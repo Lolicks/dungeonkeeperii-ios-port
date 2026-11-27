@@ -6,11 +6,12 @@
 > Статус: **неподписанный IPA собран**. Репозиторий:
 > `https://github.com/Lolicks/dungeonkeeperii-ios-port` (публичный, чтобы
 > использовать бесплатные минуты macOS-раннера).
-> CI run `45941116495` = SUCCESS: `output/DungeonKeeperII.ipa` (52 807 bytes),
-> внутри arm64 Mach-O + `default.metallib` + `Info.plist`.
-> Оригинальные ресурсы DK2 сконвертированы локально (13 877 файлов, 770.6 МБ).
-> **Это не готовая игра**: в IPA только нативная Metal 3D-сцена; логика, ресурсы
-> и кампания в IPA не включены; подпись для установки на iPhone отсутствует.
+> CI run `45942975899` = SUCCESS: `output/DungeonKeeperII.ipa` (435.57 МБ).
+> Внутри arm64 Mach-O + `default.metallib` + `Info.plist` + **13 877
+> конвертированных файлов DK2** (`Payload/DungeonKeeperII.app/Converted`),
+> загруженных из приватного репозитория `dungeonkeeperii-ios-assets`.
+> **Это ещё не готовая игра**: приложение пока отображает только Metal 3D-сцену;
+> игровая логика OpenKeeper не интегрирована в рантайм; IPA неподписан.
 
 ## Структура
 

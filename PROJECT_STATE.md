@@ -8,9 +8,11 @@
 - Ветка: `ios-port` (репозиторий `OpenKeeper/`, HEAD `1a0e5f5`)
 - Хост: Windows; Git 2.47; Java 1.8.0_401; Gradle/Xcode/Swift отсутствуют
 - GitHub: `Lolicks/dungeonkeeperii-ios-port` (public), ветка `ios-port`
-- IPA: **собран** в CI run `45941116495`, скачан в `output/DungeonKeeperII.ipa` (52 807 bytes)
-- IPA содержимое: arm64 Mach-O + `default.metallib` + Info.plist; неподписанный
-- DK2 ресурсы: сконвертированы локально, 13 877 файлов / 770.6 МБ (в Git не загружаются)
+- IPA: **собран** в CI run `45942975899`, скачан в `output/DungeonKeeperII.ipa` (435.57 МБ)
+- IPA содержимое: arm64 Mach-O + `default.metallib` + Info.plist +
+  13 877 файлов DK2 в `Payload/DungeonKeeperII.app/Converted`; неподписанный
+- DK2 ресурсы: сконвертированы локально и загружены в приватный репозиторий
+  `Lolicks/dungeonkeeperii-ios-assets` (не в публичный)
 - Установка на iPhone: **не выполнялась** (нужна Apple подпись)
 - Соответствие оригиналу: **НЕ ПРОВЕРЕНО**
 - Прогресс: вычисляется из подтверждённых задач, не фиксируется вручную
@@ -35,7 +37,7 @@
 
 1. Локальный хост — Windows: сборка идёт в GitHub Actions (решено через public repo).
 2. Нет Apple Developer credentials для подписи и установки на iPhone.
-3. Ресурсы DK2 сконвертированы, но не включены в IPA и не загружены в Git.
+3. Ресурсы DK2 включены в IPA, но приложение ещё не загружает/использует их.
 4. Физический iPhone у пользователя есть, но без подписи установка невозможна.
 5. IPA содержит только тестовую 3D-сцену — не готовую игру.
 
