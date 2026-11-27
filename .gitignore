@@ -24,5 +24,13 @@ output/*.zip
 *.xcuserstate
 .DS_Store
 
+# Java build output and Gradle cache
+OpenKeeper/build/
+OpenKeeper/.gradle/
+tools/headless/out/
+
+# Copyrighted converted DK2 resources - never commit
+OpenKeeper/assets/Converted/
+
 # Backed-up upstream clone metadata (kept outside this repo)
 _upstream_backup/

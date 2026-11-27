@@ -123,6 +123,51 @@ con.execute(
      "Ported shots and social systems; Python oracle now 22 groups, all passing."),
 )
 
+asset_tasks = [
+    ("Locate original Dungeon Keeper II installation", "GAME RESOURCES", "COMPLETED", "CRITICAL",
+     "Found C:\\Program Files (x86)\\Dungeon Keeper 2 (1434 files, ~552 MB)."),
+    ("Convert original DK2 assets via OpenKeeper converter", "GAME RESOURCES", "IN PROGRESS", "CRITICAL",
+     "Headless converter prepared; needs JDK 25 + Gradle build."),
+    ("Build unsigned IPA with converted assets", "IPA & INSTALL", "NOT STARTED", "CRITICAL",
+     "Requires macOS/Xcode runner (GitHub Actions billing currently blocks jobs)."),
+]
+for title, cat, status, priority, notes in asset_tasks:
+    if not con.execute("SELECT 1 FROM tasks WHERE title=?", (title,)).fetchone():
+        con.execute(
+            "INSERT INTO tasks(title,category,weight,status,priority,notes,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (title, cat, 10 if cat == "GAME RESOURCES" else 5,
+             status, priority, notes, now),
+        )
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "INFO", "resources",
+     "Original DK2 installation found; preparing headless asset conversion."),
+)
+con.execute(
+    "UPDATE problems SET status='IN PROGRESS', detail=?, updated_at=? "
+    "WHERE title='Original Dungeon Keeper II assets not present'",
+    ("User provided C:\\Program Files (x86)\\Dungeon Keeper 2; conversion in progress.",
+     now),
+)
+
+con.execute(
+    "UPDATE tasks SET status='COMPLETED', notes=?, updated_at=? "
+    "WHERE title='Convert original DK2 assets via OpenKeeper converter'",
+    ("CONVERSION_RESULT=true: 13,877 files / 770.6 MB in assets/Converted (7 categories).", now),
+)
+con.execute(
+    "UPDATE problems SET status='RESOLVED', detail=?, updated_at=? "
+    "WHERE title='Original Dungeon Keeper II assets not present'",
+    ("Converted successfully from C:\\Program Files (x86)\\Dungeon Keeper 2 "
+     "via headless AssetsConverter; 13,877 files / 770.6 MB.", now),
+)
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "SUCCESS", "assets",
+     "Original DK2 assets converted: 13,877 files / 770.6 MB into assets/Converted."),
+)
+
 ci_title = "GitHub Actions blocked by account billing"
 if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
     con.execute(
