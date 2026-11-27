@@ -52,6 +52,25 @@ for msg in [
         (now, "INFO", "system", msg),
     )
 
+ci_title = "GitHub Actions blocked by account billing"
+if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
+    con.execute(
+        "INSERT INTO problems(title,severity,status,detail,requested_from_user,updated_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (ci_title, "CRITICAL", "OPEN",
+         "First iOS build run failed before any step: 'The job was not started because recent "
+         "account payments have failed or your spending limit needs to be increased'. "
+         "Confirmed on both macos-15 and ubuntu-latest, so this is account-level, not a code error.",
+         "Fix GitHub Billing & plans (payment method/spending limit), or explicitly authorize "
+         "making the repo public; no copyrighted DK2 assets may ever be committed.",
+         now),
+    )
+    con.execute(
+        "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+        (now, "ERROR", "github-actions",
+         "CI run 45936325569 failed before steps: GitHub billing/payment limit blocks all jobs."),
+    )
+
 con.commit()
 print("DB updated: tasks =", con.execute("SELECT COUNT(*) FROM tasks").fetchone()[0])
 con.close()

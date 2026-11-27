@@ -109,3 +109,61 @@ def output_facts() -> dict:
 def license_facts() -> dict:
     path = ROOT / "LEGAL_AND_LICENSE_REPORT.md"
     return {"available": path.exists()}
+
+
+def ci_status() -> dict:
+    """Read the real GitHub Actions status for the remote build repo.
+
+    The token is taken from the user's already configured Git credential
+    manager and is never logged or returned to the browser.
+    """
+    repo = "Lolicks/dungeonkeeperii-ios-port"
+    try:
+        cp = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            capture_output=True, text=True, timeout=10,
+        )
+        token = next((l[9:] for l in cp.stdout.splitlines() if l.startswith("password=")), "")
+        headers = {"User-Agent": "dk2-ios-control-center", "Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+        import urllib.request
+        url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=5"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        runs = data.get("workflow_runs", [])
+        out = {
+            "available": True,
+            "repo": repo,
+            "runs": [{
+                "id": r.get("id"),
+                "name": r.get("name"),
+                "status": r.get("status"),
+                "conclusion": r.get("conclusion"),
+                "html_url": r.get("html_url"),
+                "created_at": r.get("created_at"),
+            } for r in runs[:5]],
+        }
+        if runs and runs[0].get("conclusion") == "failure":
+            try:
+                jreq = urllib.request.Request(
+                    f"https://api.github.com/repos/{repo}/actions/runs/{runs[0]['id']}/jobs",
+                    headers=headers)
+                with urllib.request.urlopen(jreq, timeout=15) as resp:
+                    jobs = json.loads(resp.read().decode("utf-8"))
+                job = (jobs.get("jobs") or [None])[0]
+                if job:
+                    areq = urllib.request.Request(
+                        f"https://api.github.com/repos/{repo}/check-runs/{job['id']}/annotations",
+                        headers=headers)
+                    with urllib.request.urlopen(areq, timeout=15) as resp:
+                        annotations = json.loads(resp.read().decode("utf-8"))
+                    out["failure_reason"] = next(
+                        (a.get("message") for a in annotations if a.get("message")), "")
+            except Exception:  # noqa: BLE001
+                out["failure_reason"] = ""
+        return out
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "repo": repo, "reason": str(exc)[:200]}

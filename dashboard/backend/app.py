@@ -116,6 +116,7 @@ def build_state() -> dict:
         "repository": collectors.repository_facts(),
         "audit": collectors.audit_facts(),
         "legal": collectors.license_facts(),
+        "ci": collectors.ci_status(),
         "tasks": tasks,
         "problems": problems,
         "critical_blockers": len(critical),

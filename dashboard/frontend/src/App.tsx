@@ -27,6 +27,13 @@ type State = {
   repository: Record<string, unknown>
   audit: Record<string, unknown>
   legal: Record<string, unknown>
+  ci: {
+    available: boolean
+    repo?: string
+    runs?: { id: number; name: string; status: string; conclusion: string | null; html_url: string }[]
+    failure_reason?: string
+    reason?: string
+  }
   tasks: Task[]; problems: Problem[]; critical_blockers: number
   activity: Activity[]; builds: Build[]
 }
@@ -188,6 +195,23 @@ export default function App() {
               <div>Technical audit: {state.audit.available ? `present (${String(state.audit.bytes)} bytes)` : 'not written yet'}</div>
               <div>Legal report: {state.legal.available ? 'present' : 'not written yet'}</div>
             </div>
+          </Card>
+          <Card title="GitHub Actions — real CI status">
+            <p className="text-xs text-slate-400">Repo: {state.ci.repo ?? 'not configured'}</p>
+            {state.ci.available && state.ci.runs && state.ci.runs.length > 0 ? (
+              <>
+                <p className="mt-1 text-sm">
+                  Last run: <b className={state.ci.runs[0].conclusion === 'failure' ? 'text-rose-400' : 'text-emerald-400'}>
+                    {state.ci.runs[0].conclusion ?? state.ci.runs[0].status}
+                  </b> <span className="text-xs text-slate-500">({state.ci.runs[0].name})</span>
+                </p>
+                {state.ci.failure_reason && <p className="mt-1 text-xs text-rose-300">{state.ci.failure_reason}</p>}
+                <a className="mt-2 inline-block text-xs text-sky-400 underline"
+                   href={state.ci.runs[0].html_url} target="_blank" rel="noreferrer">Open run on GitHub ↗</a>
+              </>
+            ) : (
+              <p className="text-xs text-slate-400">No data: {state.ci.reason ?? 'unavailable'}</p>
+            )}
           </Card>
         </div>
       )}
