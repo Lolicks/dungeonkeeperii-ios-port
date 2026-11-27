@@ -22,6 +22,7 @@
 		B100000000000000000000D /* Shots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000F /* Shots.swift */; };
 		B100000000000000000000E /* Social.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000010 /* Social.swift */; };
 		B100000000000000000000F /* Converted in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000011 /* Converted */; };
+		B1000000000000000000010 /* ResourceLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000012 /* ResourceLoader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 		B200000000000000000000F /* Shots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Shots.swift; path = ../../Sources/GameLogic/Shots.swift; sourceTree = "<group>"; };
 		B2000000000000000000010 /* Social.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Social.swift; path = ../../Sources/GameLogic/Social.swift; sourceTree = "<group>"; };
 		B2000000000000000000011 /* Converted */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Converted; sourceTree = "<group>"; };
+		B2000000000000000000012 /* ResourceLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceLoader.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +72,7 @@
 				B2000000000000000000001 /* AppDelegate.swift */,
 				B2000000000000000000002 /* GameViewController.swift */,
 				B2000000000000000000003 /* Shaders.metal */,
+				B2000000000000000000012 /* ResourceLoader.swift */,
 				B2000000000000000000006 /* MapModel.swift */,
 				B2000000000000000000007 /* PathFinder.swift */,
 				B2000000000000000000008 /* CreatureNeeds.swift */,
@@ -183,6 +186,7 @@
 				B100000000000000000000C /* TaskSystem.swift in Sources */,
 				B100000000000000000000D /* Shots.swift in Sources */,
 				B100000000000000000000E /* Social.swift in Sources */,
+				B1000000000000000000010 /* ResourceLoader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
