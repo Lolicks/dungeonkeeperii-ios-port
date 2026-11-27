@@ -104,7 +104,7 @@ public enum MoodSystemRules {
     /// In-hand anger: once per game second, only after 20 seconds.
     public static func inHandAnger(angerInHand: Int, config: MoodTickConfig,
                                    gameTime: Double) -> Int {
-        guard config.secondsInHand >= secondsInHandBeforeAnger,
+        guard config.secondsInHand >= MoodTickConfig.secondsInHandBeforeAnger,
               gameTime - config.lastMoodCheckTime >= 1 else { return 0 }
         return CreatureMood.toRuntimeValue(angerInHand)
     }

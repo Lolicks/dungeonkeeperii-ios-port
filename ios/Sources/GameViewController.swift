@@ -6,6 +6,8 @@ import MetalKit
 /// This is a genuine rendering milestone, NOT the finished Dungeon Keeper II
 /// game. Game logic/resource porting is tracked in the control center.
 final class GameViewController: UIViewController {
+    // MTKView.delegate is weak, so keep the renderer alive explicitly.
+    private var renderer: Renderer?
 
     override func loadView() {
         view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
@@ -16,7 +18,9 @@ final class GameViewController: UIViewController {
         guard let metalView = view as? MTKView, let device = metalView.device else {
             fatalError("Metal is not available on this device")
         }
-        metalView.delegate = Renderer(device: device)
+        let renderer = Renderer(device: device)
+        metalView.delegate = renderer
+        self.renderer = renderer
         metalView.clearColor = MTLClearColor(red: 0.04, green: 0.06, blue: 0.10, alpha: 1)
         metalView.colorPixelFormat = .bgra8Unorm
         metalView.preferredFramesPerSecond = 60

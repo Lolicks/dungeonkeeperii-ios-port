@@ -18,14 +18,14 @@ public enum RoomObjectType: Int, Sendable {
     case manufacturer = 9
     case crate = 10
     case worshipper = 11
-    case guard = 12
+    case `guard` = 12
     case gambler = 13
     case corpse = 14
 
     /// AbstractRoomController: occupiedByCreatures is true only for these.
     public var occupiedByCreatures: Bool {
         switch self {
-        case .trainee, .worshipper, .guard, .gambler: return true
+        case .trainee, .worshipper, .`guard`, .gambler: return true
         default: return false
         }
     }
@@ -53,13 +53,13 @@ public enum StoredGoldVisual: Int, Sendable {
 }
 
 public struct MapTileState: Sendable {
-    public var terrainId: Short
-    public var ownerId: Short
-    public var roomId: Short
+    public var terrainId: Int16
+    public var ownerId: Int16
+    public var roomId: Int16
     public var gold: Int
     public var health: Int
 
-    public init(terrainId: Short = 0, ownerId: Short = 0, roomId: Short = 0,
+    public init(terrainId: Int16 = 0, ownerId: Int16 = 0, roomId: Int16 = 0,
                 gold: Int = 0, health: Int = 0) {
         self.terrainId = terrainId
         self.ownerId = ownerId
@@ -70,13 +70,13 @@ public struct MapTileState: Sendable {
 }
 
 public struct RoomState: Sendable {
-    public var roomId: Short
-    public var ownerId: Short
+    public var roomId: Int16
+    public var ownerId: Int16
     public var health: Int
     public let maxHealth: Int
     public var destroyed: Bool
 
-    public init(roomId: Short, ownerId: Short, health: Int,
+    public init(roomId: Int16, ownerId: Int16, health: Int,
                 maxHealth: Int, destroyed: Bool = false) {
         self.roomId = roomId
         self.ownerId = ownerId
@@ -93,7 +93,7 @@ public struct RoomState: Sendable {
 }
 
 /// Flat map storage mirroring MapData's `tiles[y * width + x]`.
-public struct MapData<Element>: Sendable {
+public struct MapData<Element> {
     public let width: Int
     public let height: Int
     private var elements: [Element]
