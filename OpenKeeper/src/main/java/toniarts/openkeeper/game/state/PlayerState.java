@@ -1,0 +1,784 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.state;
+
+import com.jme3.app.Application;
+import com.jme3.app.state.AbstractAppState;
+import com.jme3.app.state.AppStateManager;
+import com.jme3.asset.AssetManager;
+import com.jme3.input.controls.ActionListener;
+import com.jme3.input.controls.KeyTrigger;
+import com.jme3.math.Vector3f;
+import com.jme3.scene.Spatial;
+import com.simsilica.es.Entity;
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import com.simsilica.es.EntitySet;
+import com.simsilica.es.filter.AndFilter;
+import com.simsilica.es.filter.FieldFilter;
+import de.lessvoid.nifty.Nifty;
+import toniarts.openkeeper.Main;
+import toniarts.openkeeper.game.component.Health;
+import toniarts.openkeeper.game.component.ObjectComponent;
+import toniarts.openkeeper.game.component.Owner;
+import toniarts.openkeeper.game.console.ConsoleState;
+import toniarts.openkeeper.game.controller.TrapPlacementValidator;
+import toniarts.openkeeper.game.controller.player.PlayerCreatureControl;
+import toniarts.openkeeper.game.controller.player.PlayerGoldControl;
+import toniarts.openkeeper.game.controller.player.PlayerRoomControl;
+import toniarts.openkeeper.game.controller.player.PlayerSpellControl;
+import toniarts.openkeeper.game.controller.player.PlayerStatsControl;
+import toniarts.openkeeper.game.controller.room.FiveByFiveRotatedController;
+import toniarts.openkeeper.game.data.CampaignLevel;
+import toniarts.openkeeper.game.data.GameResult;
+import toniarts.openkeeper.game.data.Keeper;
+import toniarts.openkeeper.game.data.ResearchableEntity;
+import toniarts.openkeeper.game.data.Settings;
+import toniarts.openkeeper.game.listener.PlayerListener;
+import toniarts.openkeeper.tools.convert.map.ArtResource;
+import toniarts.openkeeper.tools.convert.map.Creature;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+import toniarts.openkeeper.tools.convert.map.Player;
+import toniarts.openkeeper.tools.convert.map.TriggerAction;
+import toniarts.openkeeper.utils.Point;
+import toniarts.openkeeper.view.WorkshopCameraCycler;
+import toniarts.openkeeper.view.PlayerCameraState;
+import toniarts.openkeeper.view.PlayerEntityViewState;
+import toniarts.openkeeper.view.PlayerInteractionState;
+import toniarts.openkeeper.view.PlayerInteractionState.InteractionState;
+import toniarts.openkeeper.view.PossessionCameraState;
+import toniarts.openkeeper.view.PossessionInteractionState;
+import toniarts.openkeeper.view.SystemMessageState;
+import toniarts.openkeeper.view.control.EntityViewControl;
+import toniarts.openkeeper.view.control.IEntityViewControl;
+
+import javax.annotation.Nullable;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * The player state! GUI, camera, etc. Player interactions
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class PlayerState extends AbstractAppState implements PlayerListener {
+
+    private static final System.Logger logger = System.getLogger(PlayerState.class.getName());
+
+    protected final Main app;
+
+    protected AssetManager assetManager;
+    protected AppStateManager stateManager;
+
+    private final short playerId;
+    private final IKwdFile kwdFile;
+    private final EntityData entityData;
+    @Nullable
+    private final CampaignLevel campaignLevel;
+
+    private EntitySet heartEntities;
+    private WorkshopCameraCycler workshopCameraCycler;
+    private boolean paused = false;
+    private boolean levelWon = false;
+
+    private final List<AbstractPauseAwareState> appStates = new ArrayList<>();
+    protected PlayerInteractionState interactionState;
+    private PossessionInteractionState possessionState;
+    protected PlayerCameraState cameraState;
+    private PossessionCameraState possessionCameraState;
+
+    private boolean transitionEnd = true;
+    private PlayerScreenController screen;
+    private boolean pauseKeyRegistered = false;
+
+    private static final String PAUSE_KEY_MAPPING = Settings.Setting.PAUSE_OR_OPTIONS.name();
+    private final ActionListener pauseKeyListener = this::onPauseKey;
+    private static final String ZOOM_TO_NEXT_FIGHT_KEY_MAPPING = Settings.Setting.ZOOM_TO_NEXT_FIGHT.name();
+    private final ActionListener zoomToNextFightKeyListener = this::onZoomToNextFightKey;
+
+    public PlayerState(int playerId, IKwdFile kwdFile, EntityData entityData, boolean enabled, Main app, @Nullable CampaignLevel campaignLevel) {
+        this.playerId = (short) playerId;
+        this.kwdFile = kwdFile;
+        this.entityData = entityData;
+        this.app = app;
+        this.campaignLevel = campaignLevel;
+
+        screen = new PlayerScreenController(this, app.getNifty());
+        app.getNifty().registerScreenController(screen);
+        app.getNifty().addXml(new ByteArrayInputStream(app.getGameUiXml()));
+
+        super.setEnabled(enabled);
+    }
+
+    @Override
+    public void initialize(final AppStateManager stateManager, final Application app) {
+        super.initialize(stateManager, app);
+
+        assetManager = this.app.getAssetManager();
+        this.stateManager = stateManager;
+        heartEntities = entityData.getEntities(new AndFilter(ObjectComponent.class,
+                        new FieldFilter(ObjectComponent.class, "objectId", FiveByFiveRotatedController.OBJECT_HEART_ID),
+                        new FieldFilter(Owner.class, "ownerId", playerId)),
+                ObjectComponent.class, Owner.class, Health.class);
+    }
+
+    @Override
+    public void cleanup() {
+        unregisterPauseKey();
+        releaseWorkshopCameraCycler();
+        heartEntities.release();
+        heartEntities = null;
+
+        // Detach states
+        for (AbstractAppState state : appStates) {
+            stateManager.detach(state);
+        }
+        appStates.clear();
+        interactionState = null;
+        possessionState = null;
+        cameraState = null;
+        possessionCameraState = null;
+
+
+        // Disassemble Nifty
+        screen.cleanup();
+        Nifty nifty = app.getNifty();
+        nifty.unregisterScreenController(screen);
+        for (String screenId : nifty.getAllScreensName()) {
+            if (screen.equals(nifty.getScreen(screenId).getScreenController())) {
+                nifty.removeScreen(screenId);
+            }
+        }
+        screen = null;
+
+        // Remove the level texts only when we leave the level, so that the next
+        // level can put its own here. After the level has ended it still runs
+        // and its speeches show their texts
+        nifty.getResourceBundles().remove("level");
+
+        super.cleanup();
+    }
+
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+
+        if (!isInitialized()) {
+            return;
+        }
+
+        if (enabled) {
+
+            if (workshopCameraCycler == null) {
+                workshopCameraCycler = new WorkshopCameraCycler(entityData, playerId);
+            }
+
+            // Get the game state
+            final GameClientState gameState = stateManager.getState(GameClientState.class);
+            screen.setState(this);
+            screen.initHud(gameState.getLevelData().getGameLevel().getTextTableId().getLevelDictFile(), entityData);
+
+            // Cursor
+            app.getInputManager().setCursorVisible(true);
+
+            // Set the pause state
+            paused = false;
+            screen.setPause(paused);
+
+            appStates.add(new ConsoleState());
+
+            // Create app states
+            Player player = gameState.getLevelData().getPlayer(playerId);
+
+            possessionCameraState = new PossessionCameraState(false);
+            possessionState = new PossessionInteractionState(false) {
+                @Override
+                protected void onEnter() {
+                    screen.showPossessionFilter();
+                    gameState.setPossessedCreature(getTarget());
+                    gameState.setCeilingVisible(true);
+                }
+
+                @Override
+                protected void onExitStart() {
+                    // Cancel any spell (e.g. the Possession spell itself) that
+                    // was still selected from before entering possession
+                    interactionState.setInteractionState(InteractionState.Type.NONE, 0);
+
+                    screen.resetPossessionFilter();
+                    screen.goToScreen(IPlayerScreenController.SCREEN_HUD_ID);
+                    gameState.setPossessedCreature(null);
+                }
+
+                @Override
+                protected void onExit() {
+                    // Exit transition is done, the ceiling can go away
+                    gameState.setCeilingVisible(false);
+
+                    // Enable states
+                    for (AbstractAppState state : appStates) {
+                        if (state instanceof PossessionInteractionState
+                                || state instanceof PossessionCameraState
+                                || state instanceof ConsoleState) {
+                            // Console's "enabled" toggles the console window
+                            // open/closed rather than activating the state
+                            continue;
+                        }
+                        state.setEnabled(true);
+                    }
+                }
+
+                @Override
+                protected void onActionChange(PossessionInteractionState.Action action) {
+                    PlayerState.this.screen.updatePossessionSelectedItem(action);
+                }
+            };
+            appStates.add(possessionCameraState);
+            appStates.add(possessionState);
+
+            cameraState = new PlayerCameraState(player);
+            interactionState = new PlayerInteractionState(player, kwdFile, entityData, gameState.getMapClientService(), gameState.getTextParser()) {
+                @Override
+                protected void onInteractionStateChange(InteractionState interactionState) {
+                    PlayerState.this.screen.updateSelectedItem(interactionState);
+                }
+            };
+            appStates.add(cameraState);
+            appStates.add(interactionState);
+            // FIXME add to appStates or directly to stateManager
+            appStates.add(new SystemMessageState(screen.getMessages()));
+            // Load the state
+            for (AbstractAppState state : appStates) {
+                stateManager.attach(state);
+            }
+            registerPauseKey();
+        } else {
+            unregisterPauseKey();
+            releaseWorkshopCameraCycler();
+
+            // Detach states
+            for (AbstractAppState state : appStates) {
+                stateManager.detach(state);
+            }
+
+            appStates.clear();
+            screen.cleanup();
+            screen.goToScreen(IPlayerScreenController.SCREEN_EMPTY_ID);
+        }
+    }
+
+    @Override
+    public void update(float tpf) {
+        heartEntities.applyChanges();
+        if (workshopCameraCycler != null) {
+            workshopCameraCycler.update();
+        }
+        screen.update(tpf);
+    }
+
+    private void releaseWorkshopCameraCycler() {
+        if (workshopCameraCycler != null) {
+            workshopCameraCycler.close();
+            workshopCameraCycler = null;
+        }
+    }
+
+    /**
+     * The pause key opens and closes the game menu. This state stays enabled
+     * during the pause, so the same key also resumes. The zoom to next fight
+     * key is registered with it.
+     */
+    private void registerPauseKey() {
+        if (!pauseKeyRegistered) {
+            app.getInputManager().addMapping(PAUSE_KEY_MAPPING,
+                    new KeyTrigger(Main.getUserSettings().getInteger(Settings.Setting.PAUSE_OR_OPTIONS)));
+            app.getInputManager().addListener(pauseKeyListener, PAUSE_KEY_MAPPING);
+            app.getInputManager().addMapping(ZOOM_TO_NEXT_FIGHT_KEY_MAPPING,
+                    new KeyTrigger(Main.getUserSettings().getInteger(Settings.Setting.ZOOM_TO_NEXT_FIGHT)));
+            app.getInputManager().addListener(zoomToNextFightKeyListener, ZOOM_TO_NEXT_FIGHT_KEY_MAPPING);
+            pauseKeyRegistered = true;
+        }
+    }
+
+    private void onPauseKey(String name, boolean isPressed, float tpf) {
+        // Only from the regular game view, not e.g. while possessing or in the end screens
+        if (isPressed && screen != null
+                && PlayerScreenController.SCREEN_HUD_ID.equals(app.getNifty().getCurrentScreen().getScreenId())) {
+            screen.pauseMenu();
+        }
+    }
+
+    private void onZoomToNextFightKey(String name, boolean isPressed, float tpf) {
+        // Same as the Battle tab's right click, from the regular game view only
+        if (isPressed && screen != null
+                && PlayerScreenController.SCREEN_HUD_ID.equals(app.getNifty().getCurrentScreen().getScreenId())) {
+            screen.zoomToBattle();
+        }
+    }
+
+    private void unregisterPauseKey() {
+        if (pauseKeyRegistered) {
+            app.getInputManager().deleteMapping(PAUSE_KEY_MAPPING);
+            app.getInputManager().removeListener(pauseKeyListener);
+            app.getInputManager().deleteMapping(ZOOM_TO_NEXT_FIGHT_KEY_MAPPING);
+            app.getInputManager().removeListener(zoomToNextFightKeyListener);
+            pauseKeyRegistered = false;
+        }
+    }
+
+    public IKwdFile getKwdFile() {
+        return kwdFile;
+    }
+
+    public EntityData getEntityData() {
+        return entityData;
+    }
+
+    public PlayerScreenController getScreen() {
+        return screen;
+    }
+
+    /**
+     * Get this player
+     *
+     * @return this player
+     */
+    public Keeper getPlayer() {
+        GameClientState gs = stateManager.getState(GameClientState.class);
+        if (gs != null) {
+            return gs.getPlayer(playerId);
+        }
+        return null;
+    }
+
+    /**
+     * Does this player have a Workshop, needed for placing traps and doors
+     *
+     * @return true if the player has at least one Workshop
+     */
+    public boolean hasWorkshop() {
+        GameClientState gs = stateManager.getState(GameClientState.class);
+        return gs == null || gs.getRoomsInformation().getRoomCount(playerId, TrapPlacementValidator.WORKSHOP_ROOM_ID) > 0;
+    }
+
+    public PlayerStatsControl getStatsControl() {
+        Keeper keeper = getPlayer();
+//        if (keeper != null) {
+//            return keeper.getStatsControl();
+//        }
+        return null;
+    }
+
+    public PlayerGoldControl getGoldControl() {
+        Keeper keeper = getPlayer();
+//        if (keeper != null) {
+//            return keeper.getGoldControl();
+//        }
+        return null;
+    }
+
+    public PlayerCreatureControl getCreatureControl() {
+        Keeper keeper = getPlayer();
+//        if (keeper != null) {
+//            return keeper.getCreatureControl();
+//        }
+        return null;
+    }
+
+    public PlayerRoomControl getRoomControl() {
+        Keeper keeper = getPlayer();
+//        if (keeper != null) {
+//            return keeper.getRoomControl();
+//        }
+        return null;
+    }
+
+    public PlayerSpellControl getSpellControl() {
+        Keeper keeper = getPlayer();
+//        if (keeper != null) {
+//            return keeper.getSpellControl();
+//        }
+        return null;
+    }
+
+    public void setTransitionEnd(boolean value) {
+        transitionEnd = value;
+    }
+
+    public boolean isTransitionEnd() {
+        return transitionEnd;
+    }
+
+    public void setWideScreen(boolean enable) {
+        if (interactionState.isInitialized()) {
+            interactionState.setEnabled(!enable);
+        }
+
+        if (enable) {
+            screen.goToScreen(IPlayerScreenController.SCREEN_CINEMATIC_ID);
+        } else {
+            screen.goToScreen(IPlayerScreenController.SCREEN_HUD_ID);
+        }
+    }
+
+    public void setText(int textId, boolean introduction, int pathId) {
+        screen.setCinematicText(textId, introduction, pathId);
+    }
+
+    public void setGeneralText(int textId) {
+        screen.setCinematicText(textId);
+    }
+
+    public void flashButton(TriggerAction.MakeType buttonType, short targetId, TriggerAction.ButtonType targetButtonType, boolean enabled, int time) {
+        screen.flashButton(buttonType, targetId, targetButtonType, enabled, time);
+    }
+
+    protected List<ResearchableEntity> getAvailableRoomsToBuild() {
+
+        // TODO: cache, or something, maybe add the listeners here
+        Keeper keeper = getPlayer();
+        return keeper.getAvailableRooms();
+    }
+
+    protected List<ResearchableEntity> getAvailableKeeperSpells() {
+
+        // TODO: cache, or something, maybe add the listeners here
+        Keeper keeper = getPlayer();
+        return keeper.getAvailableSpells();
+    }
+
+    protected List<ResearchableEntity> getAvailableDoors() {
+        // TODO: cache, or something, maybe add the listeners here
+        Keeper keeper = getPlayer();
+        return keeper.getAvailableDoors();
+    }
+
+    protected List<ResearchableEntity> getAvailableTraps() {
+        // TODO: cache, or something, maybe add the listeners here
+        Keeper keeper = getPlayer();
+        return keeper.getAvailableTraps();
+    }
+
+    public void setPaused(boolean paused) {
+
+        // Pause / unpause
+        // TODO: We should give the client to these states to self register to the client service listener...
+        // But PlayerState is persistent.. I don't want to have the reference here
+        if (paused) {
+            stateManager.getState(GameClientState.class).getGameClientService().pauseGame();
+        } else {
+            stateManager.getState(GameClientState.class).getGameClientService().resumeGame();
+        }
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public void onPaused(boolean paused) {
+
+        // Pause state
+        this.paused = paused;
+
+        // Delegate to the screen
+        screen.onPaused(paused);
+
+        for (AbstractPauseAwareState state : appStates) {
+            if (state.isPauseable()) {
+                state.setEnabled(!paused);
+            }
+        }
+    }
+
+    public void quitToMainMenu() {
+
+        // Detach game and enable main menu
+        stateManager.getState(GameClientState.class).detach();
+        stateManager.detach(this);
+        stateManager.getState(MainMenuState.class).setEnabled(true);
+    }
+
+    public void quitToDebriefing() {
+        // TODO copy results of game from GameState
+        GameResult result = new GameResult();
+        result.setData(GameResult.ResultType.LEVEL_WON, levelWon);
+        stateManager.getState(GameClientState.class).detach();
+        stateManager.detach(this);
+        stateManager.getState(MainMenuState.class).doDebriefing(result, kwdFile, campaignLevel);
+    }
+
+    public void quitToOS() {
+        app.stop();
+    }
+
+    public void cycleDoor(short doorId) {
+        if (workshopCameraCycler != null && cameraState != null) {
+            Vector3f position = workshopCameraCycler.nextDoor(doorId);
+            if (position != null) {
+                zoomToPosition(position, true);
+            }
+        }
+    }
+
+    public void cycleTrap(short trapId) {
+        if (workshopCameraCycler != null && cameraState != null) {
+            Vector3f position = workshopCameraCycler.nextTrap(trapId);
+            if (position != null) {
+                zoomToPosition(position, true);
+            }
+        }
+    }
+
+    public void zoomToDungeon() {
+        cameraState.setCameraLookAt(stateManager.getState(GameClientState.class).getPlayer(playerId).getDungeonHeartLocation());
+    }
+
+    /**
+     * Zoom to entity
+     *
+     * @param entityId the entity to zoom to
+     * @param animate whether to animate the transition
+     */
+    public void zoomToEntity(EntityId entityId, boolean animate) {
+        PlayerEntityViewState entityViewState = stateManager.getState(GameClientState.class).getEntityViewState();
+        Spatial spatial = entityViewState != null ? entityViewState.getEntitySpatial(entityId) : null;
+        if (spatial != null) {
+            zoomToPosition(spatial.getLocalTranslation(), animate);
+        }
+    }
+
+    /**
+     * Zoom to position
+     *
+     * @param position the position to zoom to
+     * @param animate whether to animate the transition
+     */
+    public void zoomToPosition(Vector3f position, boolean animate) {
+        if (animate) {
+            cameraState.zoomToPoint(position);
+        } else {
+            cameraState.setCameraLookAt(position);
+        }
+    }
+
+    /**
+     * Pick up an entity
+     *
+     * @param entityId entity
+     */
+    public void pickUpEntity(EntityId entityId) {
+
+        // TODO: We should really have some sort of static etc. service that we can just ask these for entityId, not to pass a view controller
+        // They can be used with convenience methods from the view controller yes, but so that all will have access, shared with game logic, so the rules are the same (canPickup etc.)
+        interactionState.pickupObject(new EntityViewControl(entityId, entityData, app, null, assetManager, null) {
+            @Override
+            protected ArtResource getAnimationData(Object state) {
+                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+            }
+        });
+    }
+
+    public short getPlayerId() {
+        return playerId;
+    }
+
+    protected Creature getPossessionCreature() {
+        EntityId target = possessionState.getTarget();
+        PlayerEntityViewState entityViewState = target != null ? stateManager.getState(GameClientState.class).getEntityViewState() : null;
+        IEntityViewControl<?, ?> control = entityViewState != null ? entityViewState.getEntityViewControl(target) : null;
+
+        if (control != null && control.getDataObject() instanceof Creature creature) {
+            return creature;
+        }
+        logger.log(System.Logger.Level.WARNING,
+                "No possession creature: target={0}, entityViewState={1}, control={2}", target, entityViewState, control);
+        return null;
+    }
+
+    protected InteractionState getInteractionState() {
+        return interactionState.getInteractionState();
+    }
+
+    public void rotateViewAroundPoint(Vector3f point, boolean relative, int angle, int time) {
+        cameraState.rotateAroundPoint(point, relative, angle, time);
+    }
+
+    public void showMessage(int textId) {
+        SystemMessageState.addMessageIfAttached(stateManager, SystemMessageState.MessageType.INFO, String.format("${level.%d}", textId));
+    }
+
+    public void zoomToPoint(Vector3f point) {
+        cameraState.zoomToPoint(point);
+    }
+
+    protected void grabGold(int amount) {
+        if (!interactionState.isKeeperHandFull()) {
+            stateManager.getState(GameClientState.class).getGameClientService().getGold(amount);
+        }
+    }
+
+    /**
+     * End the game for the player
+     *
+     * @param win did we win or not
+     */
+    protected void endGame(boolean win) {
+        levelWon = win;
+
+        // Save campaign progress on win
+        if (win && campaignLevel != null) {
+            Settings settings = Main.getUserSettings();
+            settings.increaseLevelAttempts(campaignLevel);
+            settings.setLevelStatus(campaignLevel, Settings.LevelStatus.COMPLETED);
+            settings.setSetting(Settings.Setting.LEVEL_NUMBER, campaignLevel.getLevel() + 1);
+            try {
+                settings.save();
+            } catch (IOException ex) {
+                logger.log(System.Logger.Level.ERROR, "Failed to save level progress!", ex);
+            }
+        }
+
+        // Started straight into a level for testing, no need for the outro and debriefing
+        if (win && Main.isLevelArgumentGiven()) {
+            quitToOS();
+            return;
+        }
+
+        // Disable us to get rid of all interaction
+        setEnabled(false);
+        stateManager.attach(new EndGameState(this));
+    }
+
+    String getTooltipText(String text) {
+        int dungeonHealth = getDungeonHeartHealth();
+        int paydayCost = screen.getPayDayCost();
+
+        return text.replaceAll("%19%", String.valueOf(dungeonHealth))
+                .replaceAll("%20", String.valueOf(paydayCost));
+    }
+
+    /**
+     * The health of our Dungeon Heart in percent. Like the heart icon in DK II
+     * this is the health of the heart object, the one creatures attack
+     *
+     * @return health percentage, 0 if we have no heart
+     */
+    private int getDungeonHeartHealth() {
+        for (Entity heart : heartEntities) {
+            Health health = heart.get(Health.class);
+            return health.health * 100 / health.maxHealth;
+        }
+
+        return 0;
+    }
+
+    @Override
+    public void onGoldChange(short keeperId, int gold) {
+        screen.setGold(gold);
+    }
+
+    @Override
+    public void onManaChange(short keeperId, int mana, int manaLoose, int manaGain) {
+        screen.setMana(mana, manaLoose, manaGain);
+    }
+
+    @Override
+    public void onBuild(short keeperId, List<Point> tiles) {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    }
+
+    @Override
+    public void onSold(short keeperId, List<Point> tiles) {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    }
+
+    @Override
+    public void onEntityAdded(short keeperId, ResearchableEntity researchableEntity) {
+        populateTab(researchableEntity);
+    }
+
+    private void populateTab(ResearchableEntity researchableEntity) {
+        if (!isEnabled()) {
+            // The HUD has been taken down, the level has ended
+            return;
+        }
+        switch (researchableEntity.getResearchableType()) {
+            case SPELL: {
+                screen.populateSpellTab();
+                break;
+            }
+            case TRAP:
+            case DOOR: {
+                screen.populateManufactureTab();
+                break;
+            }
+            case ROOM: {
+                screen.populateRoomTab();
+                break;
+            }
+        }
+    }
+
+    @Override
+    public void onEntityRemoved(short keeperId, ResearchableEntity researchableEntity) {
+        populateTab(researchableEntity);
+    }
+
+    @Override
+    public void onResearchStatusChanged(short keeperId, ResearchableEntity researchableEntity) {
+        screen.updateEntityResearch(researchableEntity);
+    }
+
+    /**
+     * Server tells us that we started or stopped possessing a creature
+     *
+     * @param target the possessed creature, {@code null} if possession ended
+     */
+    void setPossession(EntityId target) {
+        app.enqueue(() -> {
+            if (possessionState == null) {
+                return;
+            }
+            if (target != null) {
+                startPossession(target);
+            } else if (possessionState.isEnabled()) {
+                possessionState.setEnabled(false);
+            }
+        });
+    }
+
+    private void startPossession(EntityId target) {
+
+        // Disable states
+        for (AbstractAppState state : appStates) {
+            if (state instanceof PossessionInteractionState
+                    || state instanceof PossessionCameraState) {
+                continue;
+            }
+            state.setEnabled(false);
+        }
+
+        // Enable state
+        possessionState.setTarget(target);
+        possessionState.setEnabled(true);
+
+        screen.goToScreen(IPlayerScreenController.SCREEN_POSSESSION_ID);
+    }
+
+}

@@ -1,0 +1,203 @@
+/*
+ * Copyright (C) 2014-2017 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.task.objective;
+
+import com.badlogic.gdx.ai.pfa.GraphPath;
+import com.jme3.math.Vector2f;
+import java.util.Iterator;
+import java.util.List;
+import toniarts.openkeeper.game.controller.ILevelInfo;
+import toniarts.openkeeper.game.controller.IMapController;
+import toniarts.openkeeper.game.controller.creature.ICreatureController;
+import toniarts.openkeeper.game.controller.creature.Tunneller;
+import toniarts.openkeeper.game.data.Keeper;
+import toniarts.openkeeper.game.map.IMapTileInformation;
+import toniarts.openkeeper.game.navigation.INavigationService;
+import toniarts.openkeeper.game.navigation.pathfinding.INavigable;
+import toniarts.openkeeper.game.task.Task;
+import toniarts.openkeeper.game.task.TaskType;
+import toniarts.openkeeper.tools.convert.map.Terrain;
+import toniarts.openkeeper.tools.convert.map.Thing;
+import toniarts.openkeeper.utils.Point;
+import toniarts.openkeeper.utils.WorldUtils;
+
+/**
+ * Kill player objective for those goodly heroes. Can create a complex set of
+ * tasks
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class KillPlayer extends AbstractObjectiveTask {
+
+    protected final short targetPlayerId;
+    protected final ICreatureController creature;
+    protected final ILevelInfo levelInfo;
+    private final boolean wayFound;
+
+    public KillPlayer(final INavigationService navigationService, final IMapController mapController, final ILevelInfo levelInfo, short targetPlayerId, ICreatureController creature) {
+        super(navigationService, mapController, levelInfo.getPlayer(targetPlayerId).getDungeonHeartLocation(), creature.getOwnerId());
+
+        this.targetPlayerId = targetPlayerId;
+        this.creature = creature;
+        this.levelInfo = levelInfo;
+        this.wayFound = createSubTasks();
+    }
+
+    @Override
+    public boolean isValid(ICreatureController creature) {
+        if (isPlayerDestroyed()) {
+            return false;
+        }
+        if (creature == null) {
+            return true;
+        }
+
+        // Check that the objectives are still the same
+        if (!Thing.HeroParty.Objective.KILL_PLAYER.equals(creature.getObjective()) || !Short.valueOf(targetPlayerId).equals(creature.getObjectiveTargetPlayerId())) {
+            return false;
+        }
+
+        // With no steps left the creature walks straight to the heart. If it
+        // stops short of it, a new plan is needed
+        return !getTaskQueue().isEmpty() || !creature.isStopped() || creature.isAtAssignedTaskTarget();
+    }
+
+    @Override
+    public Vector2f getTarget(ICreatureController creature) {
+        Point location = creature.getCreatureCoordinates();
+        List<Point> points = mapController.getRoomControllerByCoordinates(getTaskLocation()).getRoomInstance().getCoordinates();
+        Point result = points.get(0);
+        double temp = result.distance(location);
+
+        for (Point point : points) {
+            // TODO check is point accessible by creature?
+            double distance = point.distance(location);
+            if (distance < temp) {
+                result = point;
+                temp = distance;
+            }
+        }
+
+        return new Vector2f(result.x, result.y);
+//        return WorldUtils.pointToVector2f(getTaskLocation()); // FIXME 0.5f not needed?
+    }
+
+    @Override
+    public void executeTask(ICreatureController creature, float executionDuration) {
+
+    }
+
+    /**
+     * Tells whether the target keeper takes part in the level and has a
+     * Dungeon Heart to go for. Maps can give heroes a keeper to kill whose slot
+     * is left empty, or a side, such as the heroes' own, that has no heart. A
+     * defeated keeper has lost his heart, so there is nothing left to go for
+     *
+     * @param levelInfo the level
+     * @param targetPlayerId the keeper to kill
+     * @return true if there is such a keeper to go after
+     */
+    public static boolean isTargetPresent(ILevelInfo levelInfo, short targetPlayerId) {
+        Keeper keeper = levelInfo.getPlayer(targetPlayerId);
+        return keeper != null && !keeper.isDestroyed() && keeper.getDungeonHeartLocation() != null;
+    }
+
+    private boolean isPlayerDestroyed() {
+        Keeper keeper = levelInfo.getPlayer(targetPlayerId);
+        return keeper == null || keeper.isDestroyed();
+    }
+
+    /**
+     * Plans the way to the heart
+     *
+     * @return false if there is no way there at all, not even by digging
+     */
+    private boolean createSubTasks() {
+
+        // See if we can navigate there
+        GraphPath<IMapTileInformation> outPath = navigationService.findPath(creature.getCreatureCoordinates(), WorldUtils.vectorToPoint(getTarget(creature)), getNavigable());
+        if (outPath != null) {
+            Iterator<IMapTileInformation> iter = outPath.iterator();
+            IMapTileInformation lastPoint = null;
+            boolean first = true;
+            int i = 0;
+            while (iter.hasNext()) {
+                IMapTileInformation tile = iter.next();
+                if (!navigationService.isAccessible(lastPoint, tile, creature)) {
+
+                    // Add task to last accessible point
+                    if (i != 1 && first && lastPoint != null) {
+                        addSubTask(new ObjectiveTaskDecorator(getId(), new GoToTask(navigationService, mapController, lastPoint.getLocation(), playerId)));
+                        first = false;
+                    }
+
+                    // See if we should dig
+                    Terrain terrain = levelInfo.getLevelData().getTerrain(tile.getTerrainId());
+                    if (terrain.getFlags().contains(Terrain.TerrainFlag.SOLID) && (creature.isWorker() || (creature.getParty() != null && creature.getParty().isWorkersAvailable())) && (terrain.getFlags().contains(Terrain.TerrainFlag.DWARF_CAN_DIG_THROUGH) || terrain.getFlags().contains(Terrain.TerrainFlag.ATTACKABLE))) {
+                        addSubTask(new ObjectiveTaskDecorator(getId(), new ObjectiveDigTileTask(navigationService, mapController, tile.getLocation(), playerId)) {
+
+                            @Override
+                            public boolean isWorkerPartyTask() {
+                                return true;
+                            }
+
+                        });
+                        addSubTask(new ObjectiveTaskDecorator(getId(), new GoToTask(navigationService, mapController, tile.getLocation(), playerId)));
+                    } else {
+
+                        // Hmm, this is it, should we have like attack target type tasks? Or let the AI just figure out itself
+                        return true;
+                    }
+                } else {
+                    first = true;
+                }
+                lastPoint = tile;
+                i++;
+            }
+        }
+        return outPath != null;
+    }
+
+    /**
+     * With no way to the heart there is nothing the hero can do for its
+     * objective yet. It doesn't take the task, and tries again the next time it
+     * looks for something to do
+     *
+     * @return the current task, null when there is no way to the heart
+     */
+    @Override
+    public Task getCurrentTask() {
+        return wayFound ? super.getCurrentTask() : null;
+    }
+
+    /**
+     * How the way to the heart is planned: a party plans for all its members,
+     * a worker on its own tunnels its way like a party with workers does
+     */
+    private INavigable getNavigable() {
+        if (creature.getParty() != null) {
+            return creature.getParty();
+        }
+        return creature.isWorker() ? new Tunneller(creature) : creature;
+    }
+
+    @Override
+    public TaskType getTaskType() {
+        return TaskType.KILL_PLAYER;
+    }
+
+}

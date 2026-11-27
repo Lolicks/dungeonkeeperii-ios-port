@@ -1,0 +1,311 @@
+/*
+ * Copyright (C) 2014-2019 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.controller.entity;
+
+import com.jme3.math.Vector3f;
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import toniarts.openkeeper.utils.Point;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
+import java.util.Objects;
+import toniarts.openkeeper.game.component.Armour;
+import toniarts.openkeeper.game.component.CreatureAi;
+import toniarts.openkeeper.game.component.CreatureSleep;
+import toniarts.openkeeper.game.component.CreatureSpells;
+import toniarts.openkeeper.game.component.Damage;
+import toniarts.openkeeper.game.component.Frozen;
+import toniarts.openkeeper.game.component.Gold;
+import toniarts.openkeeper.game.component.HauledBy;
+import toniarts.openkeeper.game.component.Health;
+import toniarts.openkeeper.game.component.InHand;
+import toniarts.openkeeper.game.component.Invulnerable;
+import toniarts.openkeeper.game.component.Owner;
+import toniarts.openkeeper.game.component.Position;
+import toniarts.openkeeper.game.component.Possessed;
+import toniarts.openkeeper.game.component.Stored;
+import toniarts.openkeeper.game.controller.IMapController;
+import toniarts.openkeeper.game.controller.IObjectsController;
+import toniarts.openkeeper.game.controller.creature.CreatureState;
+import toniarts.openkeeper.game.controller.creature.ICreatureController;
+import toniarts.openkeeper.game.controller.room.IRoomController;
+import toniarts.openkeeper.game.controller.room.storage.IRoomObjectControl;
+import toniarts.openkeeper.game.map.IMapTileInformation;
+import toniarts.openkeeper.utils.WorldUtils;
+
+/**
+ * A base class for all entity controllers
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public class EntityController implements IEntityController {
+    
+    private static final Logger logger = System.getLogger(EntityController.class.getName());
+
+    protected final EntityId entityId;
+    protected final EntityData entityData;
+    protected final IObjectsController objectsController;
+    protected final IMapController mapController;
+
+    public EntityController(EntityId entityId, EntityData entityData, IObjectsController objectsController, IMapController mapController) {
+        this.entityId = entityId;
+        this.entityData = entityData;
+        this.objectsController = objectsController;
+        this.mapController = mapController;
+    }
+
+    @Override
+    public EntityId getEntityId() {
+        return entityId;
+    }
+
+    @Override
+    public short getOwnerId() {
+        Owner owner = entityData.getComponent(entityId, Owner.class);
+        return owner.ownerId;
+    }
+
+    @Override
+    public int getHealth() {
+        Health health = entityData.getComponent(entityId, Health.class);
+        return health.health;
+    }
+
+    @Override
+    public int getMaxHealth() {
+        Health health = entityData.getComponent(entityId, Health.class);
+        return health.maxHealth;
+    }
+
+    @Override
+    public boolean isFullHealth() {
+        Health health = entityData.getComponent(entityId, Health.class);
+        return health.health == health.maxHealth;
+    }
+
+    @Override
+    public boolean isPickedUp() {
+        InHand inHand = entityData.getComponent(entityId, InHand.class);
+        return inHand != null;
+    }
+
+    @Override
+    public Vector3f getPosition() {
+        return getPosition(entityData, entityId);
+    }
+
+    @Override
+    public IMapTileInformation getTile() {
+        return mapController.getMapData().getTile(WorldUtils.vectorToPoint(getPosition()));
+    }
+
+    public static Vector3f getPosition(EntityData entityData, EntityId entity) {
+        Position position = entityData.getComponent(entity, Position.class);
+        if (position != null) {
+            return position.position;
+        }
+        return null;
+    }
+
+    @Override
+    public void remove() {
+        removePossession();
+        entityData.removeEntity(entityId);
+    }
+
+    @Override
+    public void removePossession() {
+        dropLoot();
+        handleAssociatedEntities();
+    }
+
+    @Override
+    public void dropLoot() {
+
+        // Drop gold, in one pile below 1000, two below 3000 and three from
+        // that up. The piles share the gold evenly, the remainder is lost (0x48F930)
+        Gold gold = entityData.getComponent(entityId, Gold.class);
+        if (gold != null && gold.gold > 0) {
+            Position position = entityData.getComponent(entityId, Position.class);
+            Point point = WorldUtils.vectorToPoint(position.position);
+            int piles = gold.gold < 1000 ? 1 : gold.gold < 3000 ? 2 : 3;
+            for (int i = 0; i < piles; i++) {
+                objectsController.addLooseGold(point.x, point.y, gold.gold / piles, gold.maxGold);
+            }
+            entityData.setComponent(entityId, new Gold(0, gold.maxGold));
+        }
+
+        // Drop Portal Gem
+        // TODO:
+    }
+
+    private void handleAssociatedEntities() {
+        removeLair();
+        removeFromRoomStrorage();
+        removeAttacks();
+    }
+
+    protected void removeFromRoomStrorage() {
+        Stored roomStorage = entityData.getComponent(entityId, Stored.class);
+        removeRoomStorage(roomStorage, entityId);
+    }
+
+    protected void removeLair() {
+        CreatureSleep creatureSleep = entityData.getComponent(entityId, CreatureSleep.class);
+        if (creatureSleep != null && creatureSleep.lairObjectId != null) {
+            Stored roomStorage = entityData.getComponent(creatureSleep.lairObjectId, Stored.class);
+            removeRoomStorage(roomStorage, creatureSleep.lairObjectId);
+        }
+    }
+
+    private void removeRoomStorage(Stored roomStorage, EntityId entityId) {
+        if (roomStorage == null) {
+            return;
+        }
+
+        // The room is the one the object is stored in, not necessarily the one under it (a chicken can wander off)
+        IRoomController roomController = mapController.getRoomController(roomStorage.room);
+        if (roomController == null) {
+            logger.log(Level.WARNING, () -> "Entity is part of room storage (" + roomStorage + ") but the room is gone!");
+            return;
+        }
+        IRoomObjectControl roomObjectControl = roomController.getObjectControl(roomStorage.objectType);
+        if (roomObjectControl != null) {
+            roomObjectControl.removeItem(entityId);
+        }
+    }
+
+    private void removeAttacks() {
+        CreatureSpells creatureSpells = entityData.getComponent(entityId, CreatureSpells.class);
+        if (creatureSpells == null) {
+            return;
+        }
+
+        // Remove all spells
+        for (EntityId spellEntityId : creatureSpells.creatureSpells) {
+            entityData.removeEntity(spellEntityId);
+        }
+        entityData.removeComponent(entityId, CreatureSpells.class);
+    }
+
+    @Override
+    public boolean isRemoved() {
+        return entityData.getComponent(entityId, Position.class) == null && entityData.getComponent(entityId, InHand.class) == null;
+    }
+
+    @Override
+    public void setHaulable(ICreatureController creature) {
+        if (creature != null) {
+            entityData.setComponent(entityId, new HauledBy(creature.getEntityId()));
+        } else {
+            entityData.removeComponent(entityId, HauledBy.class);
+        }
+    }
+
+    @Override
+    public boolean isDragged() {
+        return entityData.getComponent(entityId, HauledBy.class) != null;
+    }
+
+    @Override
+    public void setDamage(int damageAmount) {
+        setDamage(entityId, damageAmount);
+    }
+
+    @Override
+    public void setDamage(EntityId entityId, int damageAmount) {
+
+        // Our hits and shots do an invulnerable creature no harm
+        if (damageAmount <= 0 || entityData.getComponent(entityId, Invulnerable.class) == null) {
+            setDamage(entityData, entityId, damageAmount);
+        }
+    }
+
+    public static void setDamage(EntityData entityData, EntityId entityId, int damageAmount) {
+        Damage damage = entityData.getComponent(entityId, Damage.class);
+        int damageTotal = damage != null ? damage.damage : 0;
+        entityData.setComponent(entityId, new Damage(damageTotal + scaleDamage(entityData, entityId, damageAmount)));
+    }
+
+    /**
+     * Scales the damage a creature takes by what it is doing. DK II counts in
+     * 128ths: a possessed or armoured creature takes half, a frozen one a
+     * quarter more (DKII.EXE 0x4B2CE0), and one that lies stunned or is getting
+     * up takes double. Healing is never scaled
+     *
+     * @param entityData the entity data
+     * @param entityId the entity that is hit
+     * @param damageAmount the damage dealt
+     * @return the damage taken
+     */
+    private static int scaleDamage(EntityData entityData, EntityId entityId, int damageAmount) {
+        if (damageAmount <= 0) {
+            return damageAmount;
+        }
+        int multiplier = 128;
+
+        // A possessed creature has no AI. Armour on a possessed creature adds nothing
+        if (entityData.getComponent(entityId, Possessed.class) != null || entityData.getComponent(entityId, Armour.class) != null) {
+            multiplier -= 64;
+        }
+
+        // A frozen creature stands in the stunned state, but it doesn't lie stunned
+        boolean frozen = entityData.getComponent(entityId, Frozen.class) != null;
+        if (frozen) {
+            multiplier += 32;
+        }
+        CreatureAi creatureAi = entityData.getComponent(entityId, CreatureAi.class);
+        if (creatureAi != null) {
+            CreatureState state = creatureAi.getCreatureState();
+            if ((state == CreatureState.STUNNED && !frozen) || state == CreatureState.FALLEN || state == CreatureState.GETTING_UP) {
+                multiplier += 128;
+            }
+        }
+        return (int) Math.min(Integer.MAX_VALUE, (long) damageAmount * multiplier / 128);
+    }
+
+    @Override
+    public int compareTo(IEntityController t) {
+        return entityId.compareTo(t.getEntityId());
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 3;
+        hash = 29 * hash + Objects.hashCode(this.entityId);
+        return hash;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final IEntityController other = (IEntityController) obj;
+        if (!Objects.equals(this.entityId, other.getEntityId())) {
+            return false;
+        }
+        return true;
+    }
+
+}

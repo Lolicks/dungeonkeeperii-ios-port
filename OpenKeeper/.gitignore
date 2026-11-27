@@ -1,0 +1,45 @@
+/nbproject/private/
+/build/
+.idea/
+*.iml
+/assets/Converted/
+# property file which holds the configuration
+openkeeper.properties
+*.dll
+/dist/
+/HiScores.okh
+/bin/
+/build/
+test-output
+
+*.so
+
+log/*
+**/nbproject/private/
+
+.gradle
+.nb-gradle
+# Class Files #
+*.class
+
+# Package Files #
+#*.jar
+*.war
+*.ear
+lib/jME3*
+**/bin/
+
+.project
+.classpath
+.settings
+
+**/gen/
+
+**/Thumbs.db
+local.properties
+
+*.dylib
+/build/
+
+# gradle stuff #
+/private/

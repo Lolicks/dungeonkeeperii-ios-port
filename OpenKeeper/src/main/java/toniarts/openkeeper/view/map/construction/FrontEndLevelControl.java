@@ -1,0 +1,171 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.view.map.construction;
+
+import com.jme3.asset.AssetManager;
+import com.jme3.math.Vector3f;
+import com.jme3.renderer.RenderManager;
+import com.jme3.renderer.ViewPort;
+import com.jme3.scene.Spatial;
+import com.jme3.scene.control.AbstractControl;
+import toniarts.openkeeper.game.data.CampaignLevel;
+import toniarts.openkeeper.game.sound.GlobalCategory;
+import toniarts.openkeeper.game.sound.GlobalType;
+import toniarts.openkeeper.game.sound.SoundManager;
+
+/**
+ * Controls level graphics
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public class FrontEndLevelControl extends AbstractControl {
+
+    private final CampaignLevel level;
+    private final AssetManager assetManager;
+    private volatile boolean active = false;
+    private volatile boolean moved = true;
+    private volatile boolean playable = false;
+    private Vector3f baseLocation;
+    private float baseProgress;
+    private Long lastTime;
+    private ArrowBlinkControl arrowBlinkControl;
+    private static final Vector3f MOVE_VECTOR = new Vector3f(0, 0.025f, 0);
+    private static final int ACTIVATE_ANIMATION_LENGTH = 250;
+    private static final int DEACTIVATE_ANIMATION_LENGTH = 1500;
+
+    public FrontEndLevelControl(CampaignLevel level, AssetManager assetManager) {
+        this.level = level;
+        this.assetManager = assetManager;
+    }
+
+    @Override
+    public void setSpatial(Spatial spatial) {
+        super.setSpatial(spatial);
+
+        // Set the base location
+        baseLocation = new Vector3f(spatial.getLocalTranslation());
+    }
+
+    @Override
+    protected void controlUpdate(float tpf) {
+        if (moved) {
+            return;
+        }
+
+        if (lastTime != null) {
+            long elapsedTime = System.currentTimeMillis() - lastTime;
+            if (active) {
+
+                // If the spatial starts in the base location, play the sound
+                if (getSpatial().getLocalTranslation().equals(baseLocation)) {
+                    SoundManager.playSound(GlobalCategory.OBJECT_FE_MAP, GlobalType.FRONT_END_MAP_ROCK_RISE);
+                }
+
+                // Play the animation
+                playAnimation(ACTIVATE_ANIMATION_LENGTH, baseLocation, baseLocation.add(MOVE_VECTOR), elapsedTime);
+            } else {
+                playAnimation(DEACTIVATE_ANIMATION_LENGTH, baseLocation.add(MOVE_VECTOR), baseLocation, elapsedTime);
+            }
+        } else {
+            lastTime = System.currentTimeMillis();
+            baseProgress = baseLocation.distance(spatial.getLocalTranslation()) / baseLocation.distance(baseLocation.add(MOVE_VECTOR));
+            if (!active) {
+                baseProgress = 1f - baseProgress;
+            }
+        }
+    }
+
+    @Override
+    protected void controlRender(RenderManager rm, ViewPort vp) {
+        /* Optional: rendering manipulation (for advanced users) */
+    }
+
+    /**
+     * Sets this controller active (not enabled/disabled). When active, the
+     * associated arrow (if any) stays solid red. When inactive, the arrow
+     * resumes blinking.
+     *
+     * @param active active status
+     */
+    public void setActive(boolean active) {
+        if (active != this.active) {
+            this.moved = false;
+            this.lastTime = null;
+        }
+        this.active = active;
+
+        if (arrowBlinkControl != null) {
+            arrowBlinkControl.setSolidRed(active);
+        }
+    }
+
+    /**
+     * Get the Level Object
+     *
+     * @return Level
+     */
+    public CampaignLevel getLevel() {
+        return level;
+    }
+
+    /**
+     * Sets whether this level is selectable by the player
+     *
+     * @param playable true if the level can be selected
+     */
+    public void setPlayable(boolean playable) {
+        this.playable = playable;
+    }
+
+    /**
+     * Returns whether this level is selectable by the player
+     *
+     * @return true if the level can be selected
+     */
+    public boolean isPlayable() {
+        return playable;
+    }
+
+    /**
+     * Sets the arrow blink control associated with this level. The control
+     * manages the blinking red animation on the level's arrow indicator.
+     *
+     * @param control the blink control, or null to disassociate
+     */
+    public void setArrowBlinkControl(ArrowBlinkControl control) {
+        this.arrowBlinkControl = control;
+    }
+
+    private void playAnimation(int animationLength, Vector3f base, Vector3f target, long elapsedTime) {
+        float progress = (float) elapsedTime / animationLength + baseProgress;
+
+        // See if we should end already
+        if (elapsedTime > animationLength || progress > 1.0f) {
+
+            // The end
+            moved = true;
+            lastTime = null;
+
+            // Ensure the position
+            getSpatial().setLocalTranslation(target);
+        } else {
+
+            // Interpolate the position
+            getSpatial().setLocalTranslation(new Vector3f().interpolateLocal(base, target, progress));
+        }
+    }
+}

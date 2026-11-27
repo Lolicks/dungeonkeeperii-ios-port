@@ -1,0 +1,218 @@
+/*
+ * Copyright (C) 2014-2018 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.controller;
+
+import com.jme3.math.Vector2f;
+import com.simsilica.es.EntityId;
+import java.util.List;
+import toniarts.openkeeper.game.controller.creature.ICreatureController;
+import toniarts.openkeeper.game.controller.creature.IPartyController;
+import toniarts.openkeeper.game.controller.creature.PartyType;
+import toniarts.openkeeper.tools.convert.map.Thing;
+
+/**
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public interface ICreaturesController extends IEntityWrapper<ICreatureController> {
+
+    public enum SpawnType {
+        PLACE,
+        /**
+         * Placed as if dropped by a hand (the level editor's "act as
+         * dropped"), an enemy prison or torture chamber takes it in
+         */
+        DROP,
+        ENTRANCE,
+        CONJURE
+    }
+
+    /**
+     * Spawn a creature
+     *
+     * @param creature creature data
+     * @param position the position to spawn to, may be {@code null}
+     * @return the actual spawned creature
+     */
+    EntityId spawnCreature(Thing.Creature creature, Vector2f position);
+
+    /**
+     * Spawn a creature
+     *
+     * @param creatureId the creature ID to generate
+     * @param playerId the owner
+     * @param level the creature level
+     * @param position the position to spawn to, may be {@code null}
+     * @param spawnType what type of entrance the creature is going to make
+     * @return the actual spawned creature
+     */
+    EntityId spawnCreature(short creatureId, short playerId, int level, Vector2f position, SpawnType spawnType);
+
+    /**
+     * Spawn a hero party
+     *
+     * @param partyId ID of the party
+     * @param partyType the type of the spawned party
+     * @param position the position to spawn the party
+     */
+    void spawnHeroParty(short partyId, PartyType partyType, Vector2f position);
+
+    /**
+     * Get party by party ID that is specified in the level files.
+     *
+     * @param partyId the party ID
+     * @see #getPartyById(long)
+     * @return party controller
+     */
+    IPartyController getParty(short partyId);
+
+    /**
+     * Get party by an unique ID
+     *
+     * @param id the ID
+     * @see #getParty(short)
+     * @return party controller
+     */
+    IPartyController getPartyById(long id);
+
+    /**
+     * Get parties. Note that this returns the level defined parties. Those
+     * might not have even been spawn yet.
+     *
+     * @return the level defined creature partied
+     */
+    List<IPartyController> getParties();
+
+    /**
+     * Creates an creature controller interface on top of a real entity
+     *
+     * @param entityId the entity ID
+     * @return the creature controller wrapper
+     */
+    @Override
+    ICreatureController createController(EntityId entityId);
+
+    /**
+     * Levels up a creature
+     *
+     * @param entityId the entity ID
+     * @param level the new experience level
+     * @param experience <i>leftover</i> experience for new level
+     */
+    void levelUpCreature(EntityId entityId, int level, int experience);
+
+    /**
+     * Level all player creatures to certain level
+     *
+     * @param playerId whose craetures to level up
+     * @param level the level to set to the creatures
+     */
+    void levelUpCreatures(short playerId, int level);
+
+    /**
+     * Sets the level of the Hero Toolbox creatures ("I am a tool") that are
+     * still standing in the toolbox, on the Hero Lair
+     *
+     * @param level the level to set to the tools
+     */
+    void levelUpTools(int level);
+
+    /**
+     * Increases the experience level of all of the player's creatures by the given amount, capped at the
+     * maximum creature level
+     *
+     * @param playerId whose creatures to level up
+     * @param levelIncrease how many levels to add to each creature's current level
+     */
+    void increaseLevelOfCreatures(short playerId, int levelIncrease);
+
+    /**
+     * Turns an existing creature into another creature
+     *
+     * @param entityId the existing entity to turn
+     * @param playerId the owner of the newly turned creature
+     * @param creatureId the creature to turn into
+     */
+    public void turnCreatureIntoAnother(EntityId entityId, short playerId, short creatureId);
+
+    /**
+     * The creature leaves the dungeon through a portal and is gone for good
+     *
+     * @param entityId the leaving creature
+     */
+    void leaveDungeon(EntityId entityId);
+
+    /**
+     * Gets the creature currently possessed by the given player
+     *
+     * @param playerId the possessing player
+     * @return the possessed creature entity, or {@code null} if the player possesses nothing
+     */
+    EntityId getPossessedCreature(short playerId);
+
+    /**
+     * Counts living, fully angry non-worker creatures belonging to a player.
+     *
+     * @param playerId owning player, rather than a captor
+     * @param creatureId creature type, or zero for all types
+     * @return matching creature count
+     */
+    int getAngryCreatureCount(short playerId, short creatureId);
+
+    /**
+     * Spawns creatures at the given player's dungeon heart entrance. Does nothing if the player has no
+     * dungeon heart to spawn creatures at.
+     *
+     * @param creatureId the creature to spawn
+     * @param playerId the owner, and whose dungeon heart entrance to spawn at
+     * @param level the creature level
+     * @param amount how many creatures to spawn
+     */
+    void spawnCreatures(short creatureId, short playerId, int level, int amount);
+  
+    /**
+     * Heals all of the given player's creatures to full health, waking up anyone left unconscious
+     *
+     * @param playerId whose creatures to heal
+     */
+    void healCreatures(short playerId);
+
+    /**
+     * Clears all anger reasons of the given player's creatures, the "Make Happy" special
+     *
+     * @param playerId whose creatures to calm down
+     */
+    void makeCreaturesHappy(short playerId);
+
+    /**
+     * Maxes out every anger reason of every creature not owned by the given player, the "Make Unhappy"
+     * special
+     *
+     * @param playerId the player whose enemies' creatures should be angered
+     */
+    void angerEnemyCreatures(short playerId);
+
+    /**
+     * Stuns all of the given player's imps, the "Stun enemy imps" special. Stunned creatures are simply
+     * knocked unconscious, same as being knocked out in a fight - they get back up when rescued, or die if
+     * left too long
+     *
+     * @param playerId whose imps to stun
+     */
+    void stunImps(short playerId);
+
+}

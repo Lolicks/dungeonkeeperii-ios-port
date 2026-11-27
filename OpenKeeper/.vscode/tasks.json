@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build",
+			"type": "shell",
+			"command": "gradlew compileJava --parallel --no-daemon --warning-mode all",
+			"problemMatcher": "$gradle",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+		},
+	]
+}

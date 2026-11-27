@@ -1,0 +1,281 @@
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+package toniarts.openkeeper.game.controller;
+
+import com.jme3.math.Vector2f;
+import com.simsilica.es.EntityId;
+import toniarts.openkeeper.game.controller.creature.ICreatureController;
+import toniarts.openkeeper.game.controller.room.AbstractRoomController;
+import toniarts.openkeeper.game.controller.room.IRoomController;
+import toniarts.openkeeper.game.listener.MapListener;
+import toniarts.openkeeper.game.listener.RoomListener;
+import toniarts.openkeeper.game.logic.IGameLogicUpdatable;
+import toniarts.openkeeper.game.map.IMapInformation;
+import toniarts.openkeeper.game.map.IMapTileController;
+import toniarts.openkeeper.utils.Point;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Map related actions available to all players
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public interface IMapController extends IMapInformation<IMapTileController>, IGameLogicUpdatable {
+
+    /**
+     * Set some tiles selected/undelected
+     *
+     * @param start start coordinates
+     * @param end end coordinates
+     * @param select select or unselect
+     * @param playerId the player who selected the tile
+     */
+    void selectTiles(Vector2f start, Vector2f end, boolean select, short playerId);
+
+    /**
+     * If you want to get notified about tile changes
+     *
+     * @param listener the listener
+     */
+    public void addListener(MapListener listener);
+
+    /**
+     * Stop listening to map updates
+     *
+     * @param listener the listener
+     */
+    public void removeListener(MapListener listener);
+
+    /**
+     * If you want to get notified about room changes
+     *
+     * @param playerId whose room changes you want to listen
+     * @param listener the listener
+     */
+    public void addListener(short playerId, RoomListener listener);
+
+    /**
+     * Stop listening to room updates
+     *
+     * @param playerId whose room changes you want to listen
+     * @param listener the listener
+     */
+    public void removeListener(short playerId, RoomListener listener);
+
+    /**
+     * Get all the room controllers. FIXME: At least with the current design,
+     * the clients do not have this data, so either separate interface or design
+     * controllers so that they share data
+     *
+     * @return all the room controllers
+     */
+    public Collection<IRoomController> getRoomControllers();
+
+    /**
+     * Get room controller by coordinates
+     *
+     * @param p the coordinates
+     * @return the room controller in the coordinates, if any
+     */
+    public IRoomController getRoomControllerByCoordinates(Point p);
+
+    /**
+     * Transfers the entire room at the given tile to another player. Missing
+     * rooms and rooms already owned by that player are left unchanged.
+     *
+     * @param point a tile in the room
+     * @param playerId the new owner
+     */
+    void changeRoomOwner(Point point, short playerId);
+
+    /**
+     * Get room controller by entity ID
+     *
+     * @param entityId the room entity ID
+     * @return the room controller with the ID, if any
+     */
+    public IRoomController getRoomController(EntityId entityId);
+
+    /**
+     * Get all the rooms that implement a certain function i.e. serves as a
+     * storage for the given type etc. FIXME: At least with the current design,
+     * the clients do not have this data, so either separate interface or design
+     * controllers so that they share data
+     *
+     * @param objectType the object type (or function if you may)
+     * @param playerId the owner of the room
+     * @return list of room controllers that match your search criteria
+     */
+    public List<IRoomController> getRoomsByFunction(AbstractRoomController.ObjectType objectType, Short playerId);
+
+    /**
+     * Removes room instances
+     *
+     * @param instances the instances to remove
+     */
+    public void removeRoomInstances(EntityId... instances);
+
+    /**
+     * Update rooms in specified coordinates
+     *
+     * @param coordinates the coordinates
+     */
+    public void updateRooms(Point[] coordinates);
+
+    /**
+     * Damage a tile
+     *
+     * @param point the point
+     * @param playerId the player applying the damage
+     * @param creature optional, a creature that is damaging the tile
+     * @return you might get gold out of this
+     */
+    int damageTile(Point point, short playerId, ICreatureController creature);
+
+    /**
+     * Damage a tile by a set amount of health, e.g. from a spell. A tile that
+     * runs out of health turns into its destroyed terrain type.
+     *
+     * @param point the point
+     * @param damage the amount of health to take
+     */
+    void applyTerrainDamage(Point point, int damage);
+
+    /**
+     * Attempt to claim the tile or room, applies either damage or heal,
+     * depending on whose tile is it
+     *
+     * @param point tile coordinate
+     * @param playerId for the player
+     * @param creature the worker, its efficiency scales the work
+     */
+    void applyClaimTile(Point point, short playerId, ICreatureController creature);
+
+    /**
+     * Heal a tile
+     *
+     * @param point the point
+     * @param playerId the player applying the healing
+     * @param creature the worker, its efficiency scales the work, {@code null}
+     * if nobody is working
+     */
+    void healTile(Point point, short playerId, ICreatureController creature);
+
+    /**
+     * Alter terrain type
+     *
+     * @param pos the coordinates
+     * @param terrainId the new terrain id
+     * @param playerId the new tile owner
+     */
+    void alterTerrain(Point pos, short terrainId, short playerId);
+
+    /**
+     * Hands a whole room, with what it holds, over to another player, as
+     * when it is claimed
+     *
+     * @param room the room
+     * @param playerId the new owner
+     */
+    void transferRoom(IRoomController room, short playerId);
+
+    /**
+     * Set specified tiles flashing for certain period of time
+     *
+     * @param points the points to flash
+     * @param playerId the player whose flashing will be affected
+     * @param time   the time to flash
+     */
+    public void flashTiles(List<Point> points, short playerId, int time);
+
+    /**
+     * Set tile flashing off for specified tiles
+     *
+     * @param points the points to unflash
+     * @param playerId the player whose flashing will be affected
+     */
+    public void unFlashTiles(List<Point> points, short playerId);
+
+    /**
+     * Scripted reveal of an action point's tiles (fog of war). Fog of war is
+     * local, per-viewer view state, so this is purely a notification to the
+     * given player's client - no map/tile state is mutated here.
+     *
+     * @param points the points to reveal
+     * @param playerId the player whose fog of war is affected
+     */
+    public void revealTiles(List<Point> points, short playerId);
+
+    /**
+     * Scripted conceal of an action point's tiles (fog of war). See
+     * {@link #revealTiles(List, short)}.
+     *
+     * @param points the points to conceal
+     * @param playerId the player whose fog of war is affected
+     */
+    public void concealTiles(List<Point> points, short playerId);
+
+    /**
+     * The Sight of Evil keeper spell: reveal an area through the fog of war
+     * for a while. Like {@link #revealTiles(List, short)} this only notifies
+     * the given player's client, fog of war is per-viewer view state.
+     *
+     * @param centre the cast tile
+     * @param radius the radius of the revealed area, in tiles
+     * @param durationTicks how long the area stays revealed, in game ticks
+     * @param playerId the player whose fog of war is affected
+     */
+    public void revealSightOfEvil(Point centre, int radius, int durationTicks, short playerId);
+
+    /**
+     * The {@code REMOVE_FOW} cheat: disable fog of war for the given player
+     *
+     * @param playerId the player whose fog of war is affected
+     */
+    public void disableFogOfWar(short playerId);
+
+    /**
+     * The {@code RESET_FOW} console command: reset fog of war for the given
+     * player, as if the level had just started
+     *
+     * @param playerId the player whose fog of war is affected
+     */
+    public void resetFogOfWar(short playerId);
+
+    /**
+     * Get the same terrain adjacent (not diagonally) to the stating point(s).
+     * Kinda flood fill. The starting points maybe different terrain types.
+     *
+     * @param startingPoints starting coordinates for the search
+     * @param x1 min x coordinate, inclusive
+     * @param x2 max x coordinate, exclusive
+     * @param y1 min y coordinate, inclusive
+     * @param y2 max y coordinate, exclusive
+     * @return all the terrain points within the given area that match the
+     * terrain in the starting coordinates
+     */
+    public Set<Point> getTerrainBatches(List<Point> startingPoints, int x1, int x2, int y1, int y2);
+
+    /**
+     * Shorthand for getting player skeleton capacity
+     *
+     * @param playerId player to check
+     * @return the maximum number of skeletons the player can currently have
+     */
+    public int getPlayerSkeletonCapacity(short playerId);
+
+    /**
+     * Add a coordinate to a room
+     *
+     * @param roomInstance roomInstance to add
+     * @param points coordinate(s) to add
+     */
+    public void addRoomCoordinate(EntityId roomInstance, Collection<Point> points);
+
+}

@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+
+# Local state
+dashboard/database/*.db
+dashboard/database/*.db-*
+database/*.db
+database/*.db-*
+dashboard/logs/*
+dashboard/reports/*
+!dashboard/logs/.gitkeep
+!dashboard/reports/.gitkeep
+
+# Build output
+output/DerivedData/
+output/Payload/
+output/*.ipa
+output/*.zip
+*.xcuserstate
+.DS_Store
+
+# Backed-up upstream clone metadata (kept outside this repo)
+_upstream_backup/

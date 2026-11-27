@@ -1,0 +1,75 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ios-port, main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned development IPA on macOS
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build archive (unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/DungeonKeeperII.xcodeproj \
+            -scheme DungeonKeeperII \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination generic/platform=iOS \
+            -archivePath "$RUNNER_TEMP/DungeonKeeperII.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/DungeonKeeperII.xcarchive/Products/Applications/DungeonKeeperII.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/DungeonKeeperII.app"
+          mkdir -p output
+          (cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/output/DungeonKeeperII.ipa" Payload)
+          ls -lh output/DungeonKeeperII.ipa
+
+      - name: Write build report
+        run: |
+          set -euo pipefail
+          cat > output/BUILD_REPORT.md <<EOF
+          # BUILD_REPORT
+
+          - Status: SUCCESS (unsigned development build)
+          - Runner: macOS / GitHub Actions
+          - Xcode: $(xcodebuild -version | head -1)
+          - Commit: ${{ github.sha }}
+          - Artifact: output/DungeonKeeperII.ipa
+          - Size: $(stat -f%z output/DungeonKeeperII.ipa) bytes
+          - Contents: native iOS Metal application with a working rotating 3D scene.
+          - NOT included: OpenKeeper game logic, original DK2 assets, campaign, AI.
+          - NOT signed: installation on a real iPhone requires Apple Developer signing.
+          - Fidelity to original game: UNVERIFIED.
+          EOF
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DungeonKeeperII-ipa
+          path: output/DungeonKeeperII.ipa
+          if-no-files-found: error
+
+      - name: Upload build report
+        uses: actions/upload-artifact@v4
+        with:
+          name: BUILD_REPORT
+          path: output/BUILD_REPORT.md
+          if-no-files-found: error

@@ -1,0 +1,620 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.view.map.construction;
+
+import com.jme3.asset.AssetManager;
+import com.jme3.asset.TextureKey;
+import com.jme3.material.Material;
+import com.jme3.math.FastMath;
+import com.jme3.scene.BatchNode;
+import com.jme3.scene.Geometry;
+import com.jme3.scene.Node;
+import com.jme3.scene.SceneGraphVisitor;
+import com.jme3.scene.Spatial;
+import com.jme3.texture.Texture;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.List;
+import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import toniarts.openkeeper.tools.convert.map.Creature;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+import toniarts.openkeeper.utils.Point;
+import toniarts.openkeeper.common.RoomInstance;
+import toniarts.openkeeper.game.data.CampaignLevel;
+import toniarts.openkeeper.game.data.Settings;
+import toniarts.openkeeper.tools.convert.KmfModelLoader;
+import toniarts.openkeeper.tools.convert.map.ArtResource;
+import toniarts.openkeeper.utils.AssetUtils;
+import toniarts.openkeeper.utils.FullMoon;
+import toniarts.openkeeper.utils.WorldUtils;
+import toniarts.openkeeper.game.map.WallSection;
+
+import javax.annotation.Nonnull;
+
+/**
+ * Loads up a hero gate, front end edition. Main menu. Most of the objects are
+ * listed in the objects, but I don't see how they help<br>
+ * TODO: Effect on the gem holder & lightning, controls for the level selection
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class HeroGateFrontEndConstructor extends RoomConstructor {
+
+    private static final Logger logger = Logger.getLogger(HeroGateFrontEndConstructor.class.getName());
+
+    // Blue highlighted (_E) levels by the currently active level number. Only
+    // meaningful after level 5 is completed. Keyed by Settings.getNextPlayableLevel().
+    private static final Map<Integer, Set<Integer>> HIGHLIGHT_BY_ACTIVE_LEVEL = Map.ofEntries(
+            Map.entry(6, Set.of(7, 8)),
+            Map.entry(7, Set.of(7, 8, 10)),
+            Map.entry(8, Set.of(8, 10, 12)),
+            Map.entry(9, Set.of(10, 12)),
+            Map.entry(10, Set.of(12)),
+            Map.entry(11, Set.of(11, 12, 16)),
+            Map.entry(13, Set.of(13, 16)),
+            Map.entry(17, Set.of(17, 18)));
+
+    /**
+     * Name of the node holding the creature that shows the MPD progress
+     */
+    public static final String MPD_CREATURE_NODE_NAME = "MpdCreature";
+
+    private final IKwdFile kwdFile;
+
+    public HeroGateFrontEndConstructor(AssetManager assetManager, RoomInstance roomInstance, IKwdFile kwdFile) {
+        super(assetManager, roomInstance);
+        this.kwdFile = kwdFile;
+    }
+
+    @Override
+    protected BatchNode constructFloor() {
+        BatchNode root = new BatchNode();
+        // The front end hero gate
+
+        // Contruct the tiles
+        int i = 1;
+        Point start = roomInstance.getCoordinates().get(0);
+        for (Point p : roomInstance.getCoordinates()) {
+            ArtResource artResource = roomInstance.getRoom().getCompleteResource();
+            Spatial tile = AssetUtils.loadModel(assetManager, artResource.getName() + i, artResource, false, true);
+
+            // Reset
+            moveSpatial(tile, start, p);
+
+            switch (i) {
+
+                case 7:
+                    showMpdProgress(root, start, p);
+
+                    break;
+                case 11:
+
+                    // Map
+                    Node map = constructCampaignTable(p, start);
+
+                    // Add the map node
+                    root.attachChild(map);
+
+                    break;
+                case 13:
+                case 15:
+                    // fix for widescreen, copy the current tile und move it 1 tile behind
+                    final Spatial fixtile = tile.clone();
+                    fixtile.move(0, 0,  1);
+                    root.attachChild(fixtile);
+                    break;
+            }
+
+            root.attachChild(tile);
+            i++;
+        }
+
+        // Set the transform and scale to our scale and 0 the transform
+        AssetUtils.translateToTile(root, start);
+
+        return root;
+    }
+
+    @Nonnull
+    private Node constructCampaignTable(Point p, Point start) {
+        Node map = new Node("Map");
+        for (int x = 1; x < 21; x++) {
+            switch (x) {
+                case 6:
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "a", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "a" + "_arrows", assetManager, start, p));
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "b", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "b" + "_arrows", assetManager, start, p));
+                    break;
+                case 11:
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "a", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "a" + "_arrows", assetManager, start, p));
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "b", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "b" + "_arrows", assetManager, start, p));
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "c", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "c" + "_arrows", assetManager, start, p));
+                    break;
+                case 15:
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "a", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "a" + "_arrows", assetManager, start, p));
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, "b", assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "b" + "_arrows", assetManager, start, p));
+                    break;
+                default:
+                    attachAndCreateLevel(map, CampaignLevel.LevelType.Level, x, null, assetManager, start, p);
+                    map.attachChild(loadObject("3dmaplevel" + x + "_arrows", assetManager, start, p));
+            }
+        }
+
+        // Secret levels (only show if discovered, except moon level)
+        for (int x = 1; x < 6; x++) {
+            if (x == 5 && !FullMoon.isFullMoon()) {
+                // don't show full moon level
+                continue;
+            }
+            CampaignLevel secretLevel = new CampaignLevel(CampaignLevel.LevelType.Secret, x);
+            Settings.SecretLevelStatus status = Settings.getInstance().getSecredLevelStatus(secretLevel);
+            if (x == 5 || status == Settings.SecretLevelStatus.DISCOVERED
+                    || status == Settings.SecretLevelStatus.IN_PROGRESS) {
+                attachAndCreateLevel(map, CampaignLevel.LevelType.Secret, x, null, assetManager, start, p);
+            }
+        }
+
+        // The map base
+        map.attachChild(loadObject("3dmap_level21", assetManager, start, p));
+
+        // Apply campaign progression: show arrows only for current level,
+        // mark completed/current levels as playable, lock future levels
+        applyCampaignProgression(map);
+        return map;
+    }
+
+    @Override
+    public Spatial getWallSpatial(Point start, WallSection.WallDirection direction) {
+        return null;
+    }
+
+    /**
+     * Creates and attach the level node, creates a control for it
+     *
+     * @param map node to attach to
+     * @param type level type
+     * @param levelNumber level number
+     * @param variation variation, like level "a" etc.
+     * @param assetManager the asset manager instance
+     * @param start starting point for the room
+     * @param p this tile coordinate
+     */
+    private void attachAndCreateLevel(Node map, CampaignLevel.LevelType type, int levelNumber, String variation,
+                                      AssetManager assetManager, Point start, Point p) {
+
+        String objName = "3dmap_level";
+        if (CampaignLevel.LevelType.Secret.equals(type)) {
+            objName = "Secret_Level";
+        }
+
+        Spatial lvl = loadObject(objName + levelNumber + (variation == null ? "" : variation),
+                assetManager, start, p);
+        lvl.addControl(new FrontEndLevelControl(new CampaignLevel(type, levelNumber, variation), assetManager));
+        lvl.setBatchHint(Spatial.BatchHint.Never);
+        map.attachChild(lvl);
+    }
+
+    /**
+     * Load an object asset
+     *
+     * @param model the model string
+     * @param assetManager the asset manager instance
+     * @param start starting point
+     * @param p the current point
+     * @return reset and ready to go model (also animated if there is a such
+     * option)
+     */
+    private Spatial loadObject(String model, AssetManager assetManager, Point start, Point p) {
+        Node object = (Node) AssetUtils.loadModel(assetManager, model, null, false, true);
+        object.setName(model);
+
+        // Reset
+        moveSpatial(object, start, p);
+        object.move(0, WorldUtils.FLOOR_HEIGHT, 0);
+
+        return object;
+    }
+
+    private void showMpdProgress(BatchNode root, Point start, Point p) {
+        String creatureName = "";
+
+        String[] creatureNames = new String[]{"Dwarf", "Guard", "Knight", "Lord Of The Land", "Prince Balder", "King Reginald"};
+
+        for (int i = 6; i > 0; i--) {
+            CampaignLevel mpdLevel = new CampaignLevel(CampaignLevel.LevelType.MPD, i);
+            // the level before it must be completed
+            if (!Settings.getInstance().getLevelStatus(mpdLevel).equals(Settings.LevelStatus.COMPLETED)) {
+                continue;
+            }
+
+            // Hero creature shown depending on the MPD level progression
+            creatureName = creatureNames[i - 1];
+            // if we already found a completed level, exit the loop
+            break;
+        }
+
+        if (creatureName.isEmpty()) {
+            return;
+        }
+
+        Creature creature = getCreature(creatureName);
+        if (creature == null) {
+            return;
+        }
+
+        final Node mpdObj = new Node(MPD_CREATURE_NODE_NAME);
+
+        // The idle animations to rotate between
+        CreatureRandomAnimationControl animationControl = new CreatureRandomAnimationControl(creature, assetManager,
+                List.of(Creature.AnimationType.IDLE_1, Creature.AnimationType.IDLE_2,
+                        Creature.AnimationType.DRINKING, Creature.AnimationType.HAPPY,
+                        Creature.AnimationType.ANGRY, Creature.AnimationType.DRUNKED_IDLE,
+                        Creature.AnimationType.DANCE, Creature.AnimationType.MELEE_ATTACK));
+        mpdObj.addControl(animationControl);
+
+        // Don't batch animated objects, seems not to work
+        mpdObj.setBatchHint(Spatial.BatchHint.Never);
+
+        mpdObj.rotate(0, FastMath.PI / 2, 0);
+        mpdObj.scale(0.8f);
+        mpdObj.move(-0.3f, WorldUtils.FLOOR_HEIGHT, p.y - start.y);
+        root.attachChild(mpdObj);
+    }
+
+    /**
+     * Find a creature by its name.
+     *
+     * @param name the creature name to look for
+     * @return the creature or {@code null} if not found
+     */
+    private Creature getCreature(String name) {
+        for (Creature creature : kwdFile.getCreatureList()) {
+            if (creature.getName().equalsIgnoreCase(name)) {
+                return creature;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the level number from an arrow model name. E.g.
+     * "3dmaplevel6a_arrows" returns 6, "3dmaplevel11c_arrows" returns 11.
+     *
+     * @param name the arrow model name
+     * @return the level number
+     */
+    private static int extractArrowLevelNumber(String name) {
+        String stripped = name.replace("3dmaplevel", "").replace("_arrows", "");
+        StringBuilder num = new StringBuilder();
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
+            if (Character.isDigit(c)) {
+                num.append(c);
+            } else {
+                break;
+            }
+        }
+        return Integer.parseInt(num.toString());
+    }
+
+    /**
+     * Refreshes arrow visibility and level playability on the 3D campaign map
+     * based on the current campaign progression stored in Settings. Call this
+     * after resetting campaign progress to update the visual state.
+     *
+     * @param mapNode the map node containing level and arrow children
+     */
+    public static void applyCampaignProgression(Node mapNode) {
+        int nextLevel = Settings.getInstance().getNextPlayableLevel();
+
+        // Key: "{levelNumber}_{variation}" e.g. "6_a", or "7" for non-branching
+        Map<String, ArrowBlinkControl> arrowControls = new HashMap<>();
+
+        for (Spatial child : mapNode.getChildren()) {
+            String name = child.getName();
+
+            if (name != null && name.contains("_arrows")) {
+                child.setBatchHint(Spatial.BatchHint.Never);
+                int arrowLevel = extractArrowLevelNumber(name);
+                boolean isCurrentLevel = arrowLevel == nextLevel;
+
+                // Always hide arrows here; show them only on selectCampaignLevel screen
+                child.setCullHint(Spatial.CullHint.Always);
+
+                // Avoid stacking duplicate/stale blink controls across repeated calls
+                // (re-entering selectCampaignLevel, campaign reset, progression advancing)
+                child.removeControl(ArrowBlinkControl.class);
+
+                if (isCurrentLevel) {
+                    ArrowBlinkControl control = new ArrowBlinkControl(child);
+                    child.addControl(control);
+                    String variation = extractArrowVariation(name);
+                    String key = variation.isEmpty()
+                            ? String.valueOf(arrowLevel)
+                            : arrowLevel + "_" + variation;
+                    arrowControls.put(key, control);
+                }
+            }
+        }
+
+        for (Spatial child : mapNode.getChildren()) {
+            FrontEndLevelControl control = child.getControl(FrontEndLevelControl.class);
+            if (control != null) {
+                int levelNum = control.getLevel().getLevel();
+                control.setPlayable(levelNum <= nextLevel);
+
+                String variation = control.getLevel().getVariation();
+                String key = (variation == null || variation.isEmpty())
+                        ? String.valueOf(levelNum)
+                        : levelNum + "_" + variation;
+                ArrowBlinkControl arrowControl = arrowControls.get(key);
+                if (arrowControl != null) {
+                    control.setArrowBlinkControl(arrowControl);
+                }
+            }
+        }
+    }
+
+    /**
+     * Shows or hides the arrows for the current playable level on the 3D
+     * campaign map. Call with {@code true} when entering the
+     * {@code selectCampaignLevel} screen, and with {@code false} when leaving.
+     *
+     * @param mapNode the map node containing level and arrow children
+     * @param visible true to show current-level arrows, false to hide them
+     */
+    public static void setArrowsVisible(Node mapNode, boolean visible) {
+        int nextLevel = Settings.getInstance().getNextPlayableLevel();
+        for (Spatial child : mapNode.getChildren()) {
+            String name = child.getName();
+            if (name != null && name.contains("_arrows")) {
+                int arrowLevel = extractArrowLevelNumber(name);
+                if (arrowLevel == nextLevel) {
+                    child.setCullHint(visible
+                            ? Spatial.CullHint.Inherit
+                            : Spatial.CullHint.Always);
+                }
+            }
+        }
+    }
+
+    /**
+     * Extracts the variation suffix from an arrow model name. E.g.
+     * "3dmaplevel6a_arrows" returns "a", "3dmaplevel7_arrows" returns "".
+     *
+     * @param name the arrow model name
+     * @return the variation string, or empty if none
+     */
+    private static String extractArrowVariation(String name) {
+        String stripped = name.replace("3dmaplevel", "").replace("_arrows", "");
+        StringBuilder letters = new StringBuilder();
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
+            if (Character.isLetter(c)) {
+                letters.append(c);
+            } else {
+                break;
+            }
+        }
+        return letters.toString();
+    }
+
+    /**
+     * Applies the static level textures to the campaign map: decayed
+     * ({@code _D}) for completed levels, blue highlight ({@code _E}) for the
+     * levels highlighted for the currently active level, base otherwise. Called
+     * when entering the {@code selectCampaignLevel} screen; the blue highlight
+     * is only shown while level selection is possible, unlike the decayed
+     * texture which reflects saved progress and stays visible elsewhere too
+     * (see {@link #applyProgressTextures(Node, AssetManager)}).
+     *
+     * @param mapNode the map node containing the level children
+     */
+    public static void applyLevelTextures(Node mapNode, AssetManager assetManager) {
+        Set<Integer> highlights = getHighlightedLevels();
+        for (Spatial child : mapNode.getChildren()) {
+            FrontEndLevelControl control = child.getControl(FrontEndLevelControl.class);
+            if (control == null) {
+                continue;
+            }
+            if (highlights.contains(control.getLevel().getLevel())) {
+                applyAlternativeTexture(child, "_E", assetManager);
+            } else {
+                applyProgressTexture(child, control, assetManager);
+            }
+        }
+    }
+
+    /**
+     * Applies the persistent campaign-progress texture to the campaign map:
+     * decayed ({@code _D}) for completed levels, base otherwise. Unlike the
+     * transient blue highlight ({@code _E}), this reflects saved progress and
+     * should be visible as soon as the menu scene exists, on every main menu
+     * screen, not just while {@code selectCampaignLevel} is active.
+     *
+     * @param mapNode the map node containing the level children
+     */
+    public static void applyProgressTextures(Node mapNode, AssetManager assetManager) {
+        for (Spatial child : mapNode.getChildren()) {
+            FrontEndLevelControl control = child.getControl(FrontEndLevelControl.class);
+            if (control != null) {
+                applyProgressTexture(child, control, assetManager);
+            }
+        }
+    }
+
+    private static void applyProgressTexture(Spatial child, FrontEndLevelControl control, AssetManager assetManager) {
+        if (Settings.getInstance().getLevelStatus(control.getLevel()) == Settings.LevelStatus.COMPLETED) {
+            applyAlternativeTexture(child, "_D", assetManager);
+        } else {
+            applyAlternativeTexture(child, null, assetManager);
+        }
+    }
+
+    /**
+     * Starts the blink animation on the levels highlighted for the currently
+     * active level. The levels blink between their normal and blue highlight
+     * ({@code _E}) textures for about 8 seconds and then stay blue. Called when
+     * entering the {@code selectCampaignLevel} screen.
+     *
+     * @param mapNode the map node containing the level children
+     */
+    public static void startHighlightBlink(Node mapNode, AssetManager assetManager) {
+        Set<Integer> highlights = getHighlightedLevels();
+        for (Spatial child : mapNode.getChildren()) {
+            FrontEndLevelControl control = child.getControl(FrontEndLevelControl.class);
+            if (control == null) {
+                continue;
+            }
+            child.removeControl(HighlightBlinkControl.class);
+            if (highlights.contains(control.getLevel().getLevel())) {
+                String baseTexture = findAlternativeTexture(child, null, assetManager);
+                String highlightTexture = findAlternativeTexture(child, "_E", assetManager);
+                if (baseTexture != null && highlightTexture != null) {
+                    child.addControl(new HighlightBlinkControl(child, assetManager, baseTexture, highlightTexture));
+                }
+            }
+        }
+    }
+
+    /**
+     * Stops the highlight blink animations and restores the persistent
+     * campaign-progress textures (decayed markers for completed levels stay
+     * visible). Called when leaving the {@code selectCampaignLevel} screen, as
+     * the blue highlight is only shown while level selection is possible.
+     *
+     * @param mapNode the map node containing the level children
+     */
+    public static void stopHighlightBlink(Node mapNode, AssetManager assetManager) {
+        for (Spatial child : mapNode.getChildren()) {
+            FrontEndLevelControl control = child.getControl(FrontEndLevelControl.class);
+            if (control == null) {
+                continue;
+            }
+            child.removeControl(HighlightBlinkControl.class);
+        }
+        applyProgressTextures(mapNode, assetManager);
+    }
+
+    /**
+     * Resolves the set of level numbers that should be blue highlighted for the
+     * currently active level. Empty unless at least level 5 is completed.
+     *
+     * @return the highlighted level numbers
+     */
+    private static Set<Integer> getHighlightedLevels() {
+        int activeLevel = Settings.getInstance().getNextPlayableLevel();
+        return HIGHLIGHT_BY_ACTIVE_LEVEL.getOrDefault(activeLevel, Set.of());
+    }
+
+    /**
+     * Applies the alternative texture with the given suffix to all geometries of
+     * the level that carry the alternative textures list. A {@code null} suffix
+     * restores the base texture.
+     *
+     * @param spatial the level spatial
+     * @param suffix the texture suffix, e.g. {@code "_D"}, {@code "_E"}, or
+     * {@code null} for the base
+     */
+    private static void applyAlternativeTexture(final Spatial spatial, final String suffix, AssetManager assetManager) {
+        spatial.depthFirstTraversal(new SceneGraphVisitor() {
+            @Override
+            public void visit(Spatial s) {
+                if (!(s instanceof Geometry)) {
+                    return;
+                }
+                Geometry geometry = (Geometry) s;
+                List<String> textures = geometry.getUserData(KmfModelLoader.MATERIAL_ALTERNATIVE_TEXTURES);
+                if (textures == null) {
+                    return;
+                }
+                String targetTexture = findTexture(textures, suffix);
+                if (targetTexture == null) {
+                    return;
+                }
+                Material material = geometry.getMaterial();
+                String currentTexture = material.getTextureParam("DiffuseMap").getTextureValue().getKey().getName();
+                if (!targetTexture.equals(currentTexture)) {
+                    try {
+                        Texture texture = assetManager.loadTexture(new TextureKey(targetTexture, false));
+                        material.setTexture("DiffuseMap", texture);
+                        AssetUtils.assignMapsToMaterial(assetManager, material);
+                    } catch (Exception e) {
+                        logger.log(Level.WARNING, "Failed to apply alternative texture " + targetTexture + " to " + spatial.getName() + "! ({0})", e.getMessage());
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Finds the texture name matching the given suffix in an alternative
+     * textures list, or the base texture when the suffix is {@code null}.
+     *
+     * @param textures the alternative texture list
+     * @param suffix the suffix to match, or {@code null} for the base texture
+     * @return the canonical texture key, or {@code null} if not found
+     */
+    private static String findTexture(List<String> textures, String suffix) {
+        for (String texture : textures) {
+            String canonical = AssetUtils.getCanonicalAssetKey(texture);
+            if (suffix == null) {
+                if (!canonical.endsWith("_D.png") && !canonical.endsWith("_E.png")) {
+                    return canonical;
+                }
+            } else if (canonical.endsWith(suffix + ".png")) {
+                return canonical;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds the alternative texture name matching the given suffix on any
+     * geometry of the spatial that carries the alternative textures list.
+     *
+     * @param spatial the spatial whose textures to search
+     * @param suffix the suffix to match, or {@code null} for the base texture
+     * @return the canonical texture key, or {@code null} if not found
+     */
+    private static String findAlternativeTexture(Spatial spatial, String suffix, AssetManager assetManager) {
+        final String[] found = new String[1];
+        spatial.depthFirstTraversal(new SceneGraphVisitor() {
+            @Override
+            public void visit(Spatial s) {
+                if (found[0] != null || !(s instanceof Geometry)) {
+                    return;
+                }
+                Geometry geometry = (Geometry) s;
+                List<String> textures = geometry.getUserData(KmfModelLoader.MATERIAL_ALTERNATIVE_TEXTURES);
+                if (textures == null) {
+                    return;
+                }
+                found[0] = findTexture(textures, suffix);
+            }
+        });
+        return found[0];
+    }
+}

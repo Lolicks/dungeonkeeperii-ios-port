@@ -1,0 +1,194 @@
+/*
+ * Copyright (C) 2014-2016 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.view.effect;
+
+import com.jme3.math.Vector3f;
+import com.jme3.scene.Mesh;
+import com.jme3.scene.VertexBuffer;
+import java.nio.FloatBuffer;
+
+/**
+ *
+ * @author ArchDemon
+ */
+public class EffectMesh extends Mesh {
+
+    private float scale = 1;
+    private int frames = 1;
+    private boolean uniqueTexCoords = false;
+    private boolean flat;
+    boolean facingVelocity = false;
+    Vector3f faceNormal = Vector3f.UNIT_Y;
+
+    public EffectMesh(int frames, float scale) {
+        this(false);
+        setFrames(frames);
+        setScale(scale);
+    }
+
+    public EffectMesh(int frames) {
+        this(false);
+        setFrames(frames);
+    }
+
+    public EffectMesh() {
+        this(false);
+    }
+
+    /**
+     * @param flat true for a FLAT-flagged art resource - the quad is built
+     * lying in the XZ plane (normal up, on the floor) instead of standing in
+     * the XY plane (normal facing +Z).
+     */
+    public EffectMesh(boolean flat) {
+        super();
+
+        this.flat = flat;
+        //setMode(Mesh.Mode.Triangles);
+
+        if (flat) {
+            setBuffer(VertexBuffer.Type.Position, 3, new float[]{
+                -scale / 2, 0, 0,
+                scale / 2,  0, 0,
+                scale / 2,  0, scale,
+                -scale / 2, 0, scale
+            });
+
+            setBuffer(VertexBuffer.Type.Normal, 3, new float[]{0, 1, 0,
+                                                               0, 1, 0,
+                                                               0, 1, 0,
+                                                               0, 1, 0});
+
+            // Winding flipped (0,2,1 / 0,3,2) relative to the standing quad
+            // below so the face normal still points outward (+Y, up)
+            // instead of into the floor.
+            setBuffer(VertexBuffer.Type.Index, 3, new short[]{0, 2, 1,
+                                                              0, 3, 2});
+        } else {
+            setBuffer(VertexBuffer.Type.Position, 3, new float[]{
+                -scale / 2, 0,     0,
+                scale / 2,  0,     0,
+                scale / 2,  scale, 0,
+                -scale / 2, scale, 0
+            });
+
+            setBuffer(VertexBuffer.Type.Normal, 3, new float[]{0, 0, 1,
+                                                               0, 0, 1,
+                                                               0, 0, 1,
+                                                               0, 0, 1});
+
+            setBuffer(VertexBuffer.Type.Index, 3, new short[]{0, 1, 2,
+                                                              0, 2, 3});
+        }
+
+        setBuffer(VertexBuffer.Type.TexCoord, 2, new float[]{0, 1,
+                                                             1, 1,
+                                                             1, 0,
+                                                             0, 0});
+
+        // Particle.frag multiplies the sampled texture by this per-vertex
+        // colour (inColor) - without a bound buffer here the GL generic
+        // vertex attribute defaults to (0,0,0,1), which zeroes out the
+        // texture's own RGB and leaves every effect looking like a black/
+        // grey silhouette of its alpha shape. Opaque white is a no-op
+        // multiplier, so the texture's baked-in colour (e.g. bloodfoot.png's
+        // red vs. waterfoot.png's teal) actually shows.
+        setBuffer(VertexBuffer.Type.Color, 4, new float[]{
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            1, 1, 1, 1
+        });
+
+        updateBound();
+    }
+
+    public final void setFrames(int frames) {
+        this.frames = frames;
+        if (this.frames != 1){
+            uniqueTexCoords = true;
+            getBuffer(VertexBuffer.Type.TexCoord).setUsage(VertexBuffer.Usage.Stream);
+        }
+    }
+
+    private void setScale(float scale) {
+        this.scale = scale;
+
+        VertexBuffer pvb = getBuffer(VertexBuffer.Type.Position);
+        FloatBuffer positions = (FloatBuffer) pvb.getData();
+
+        positions.clear();
+
+        if (flat) {
+            positions.put(new float[]{
+                -scale / 2, 0, 0,
+                scale / 2,  0, 0,
+                scale / 2,  0, scale,
+                -scale / 2, 0, scale
+            });
+        } else {
+            positions.put(new float[]{
+                -scale / 2, 0,     0,
+                scale / 2,  0,     0,
+                scale / 2,  scale, 0,
+                -scale / 2, scale, 0
+            });
+        }
+
+        pvb.updateData(positions);
+    }
+
+    public void update(int frameIndex) {
+        /*
+        VertexBuffer cvb = getBuffer(VertexBuffer.Type.Color);
+        ByteBuffer colors = (ByteBuffer) cvb.getData();
+        */
+        VertexBuffer tvb = getBuffer(VertexBuffer.Type.TexCoord);
+        FloatBuffer texcoords = (FloatBuffer) tvb.getData();
+
+        texcoords.clear();
+
+        if (uniqueTexCoords) {
+            float startX = ((float) frameIndex) / frames;
+            float startY = 0f;
+            float endX   = startX + (1f / frames);
+            float endY   = 1f;
+
+            texcoords.put(new float[]{startX, endY,
+                                      endX,endY,
+                                      endX, startY,
+                                      startX, startY});
+        }
+
+//        int abgr = p.color.asIntABGR();
+//        colors.putInt(abgr);
+//        colors.putInt(abgr);
+//        colors.putInt(abgr);
+//        colors.putInt(abgr);
+
+        if (!uniqueTexCoords) {
+            texcoords.clear();
+        } else {
+            texcoords.clear();
+            tvb.updateData(texcoords);
+        }
+
+        // force renderer to re-send data to GPU
+        //cvb.updateData(colors);
+    }
+
+}

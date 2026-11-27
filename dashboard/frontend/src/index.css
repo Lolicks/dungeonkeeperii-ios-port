@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { background: #0b0f17; color: #d7dde8; font-family: ui-sans-serif, system-ui, sans-serif; }
+.card { @apply rounded-lg border border-slate-700 bg-slate-900/70 p-4; }
+.badge { @apply rounded px-2 py-0.5 text-xs font-semibold; }

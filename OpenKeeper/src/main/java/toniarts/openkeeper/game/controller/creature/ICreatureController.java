@@ -1,0 +1,567 @@
+/*
+ * Copyright (C) 2014-2018 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.controller.creature;
+
+import com.badlogic.gdx.ai.fsm.StateMachine;
+import com.jme3.math.Vector2f;
+import com.simsilica.es.EntityId;
+import toniarts.openkeeper.game.event.GameEventType;
+import toniarts.openkeeper.utils.Point;
+import java.util.function.Consumer;
+import toniarts.openkeeper.game.controller.entity.IEntityController;
+import toniarts.openkeeper.game.controller.object.IObjectController;
+import toniarts.openkeeper.game.data.ObjectiveType;
+import toniarts.openkeeper.game.logic.IGameLogicUpdatable;
+import toniarts.openkeeper.game.navigation.pathfinding.INavigable;
+import toniarts.openkeeper.game.task.Task;
+import toniarts.openkeeper.tools.convert.map.Creature;
+import toniarts.openkeeper.tools.convert.map.Thing;
+
+/**
+ * Controls creature entities
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public interface ICreatureController extends IGameLogicUpdatable, INavigable, IEntityController {
+
+    /** Move to the authored end position after a completed Portal entrance animation. */
+    public void completeDungeonEntrance();
+
+    public boolean shouldFleeOrAttack();
+
+    /**
+     * A fighter with no enemy creature to fight goes for the nearest enemy
+     * trap it sees, as DKII.EXE does
+     *
+     * @return true if there is such a trap and we are on it
+     */
+    public boolean attackVisibleTrap();
+
+    /**
+     * An idle fighter hits an enemy door that is next to it, as DKII.EXE does
+     *
+     * @return true if there is such a door and we are on it
+     */
+    public boolean attackAdjacentDoor();
+
+    /**
+     * Checks what the creature sees and hears
+     */
+    public void checkSurroundings();
+
+    public void unassingCurrentTask();
+
+    public void navigateToRandomPoint();
+
+    /**
+     * Walks to a random tile in the Combat Pit we fight in, off its edge
+     */
+    public void navigateToRandomPointInCombatPit();
+
+    public IPartyController getParty();
+
+    public StateMachine<ICreatureController, CreatureState> getStateMachine();
+
+    public boolean hasObjective();
+
+    public boolean followObjective();
+
+    public boolean needsLair();
+
+    public boolean hasLair();
+
+    public boolean findLair();
+
+    public boolean isNeedForSleep();
+
+    public boolean goToSleep();
+
+    /**
+     * Handles the manual rest target after landing and getting up. Rest can be
+     * assigned without fatigue debt, provided the creature's bed is in that Lair.
+     * Also sends a hurt creature to bed right after it has made its home.
+     *
+     * @return whether a sleep task was assigned
+     */
+    public boolean goToSleepAfterLairDrop();
+
+    public void findWork(Consumer<Boolean> workResult);
+
+    public boolean isWorker();
+
+    public boolean isTooMuchGold();
+
+    public boolean dropGoldToTreasury();
+
+    public boolean isStopped();
+
+    public void navigateToAssignedTask();
+
+    public boolean isAtAssignedTaskTarget();
+
+    public void dropGold();
+
+    public boolean isWorkNavigationRequired();
+
+    public boolean isAssignedTaskValid();
+
+    /**
+     * Gets the creature, or the enemy Dungeon Heart, we are fighting. Picks a
+     * new target if we don't have a valid one.
+     *
+     * @return the target to attack, or {@code null} if there is none
+     */
+    public IEntityController getAttackTarget();
+
+    public boolean isWithinAttackDistance(EntityId attackTarget);
+
+    /**
+     * Does the creature have an attacking spell it can cast now
+     *
+     * @return has a ranged attack ready
+     */
+    public boolean hasRangedAttackReady();
+
+    /**
+     * Casts the first attacking spell that is ready at the target, without
+     * hurting it, like a trainee at a wall target
+     *
+     * @param target what to cast at
+     */
+    public void castTrainingShot(EntityId target);
+
+    public void stopCreature();
+
+    public void executeAttack(EntityId attackTarget);
+
+    /**
+     * Casts a spell on one of our own creatures in the fight, if we have one
+     * ready and somebody needs it
+     *
+     * @return true if we cast a spell
+     */
+    public boolean castSupportSpell();
+
+    /**
+     * Lets the shot of the spell being cast leave once the cast has reached
+     * the spell's shot delay
+     */
+    public void releaseCastShot();
+
+    /**
+     * Drops the shot of an interrupted cast
+     */
+    public void cancelCastShot();
+
+    /**
+     * Lands the hit of the melee swing once the swing has reached the
+     * creature's shot delay
+     */
+    public void releaseMeleeHit();
+
+    /**
+     * Is the hit of the melee swing still to land
+     *
+     * @return true while the swing hasn't hit yet
+     */
+    public boolean hasPendingMeleeHit();
+
+    /**
+     * Drops the hit of an interrupted melee swing
+     */
+    public void cancelMeleeHit();
+
+    public void navigateToAttackTarget(EntityId attackTarget);
+
+    public ICreatureController getFollowTarget();
+
+    public Task getAssignedTask();
+
+    public float getDistanceToCreature(EntityId target);
+
+    public void navigateToRandomPointAroundTarget(EntityId target, int radius);
+
+    public void resetFollowTarget();
+
+    public void flee();
+
+    /**
+     * Weighs the threat of the enemies we fight against our fear. Call once on
+     * every turn of a fight, it takes a few turns in a row to scare us
+     *
+     * @return true if we are scared and should back off
+     */
+    public boolean isScared();
+
+    /**
+     * Starts backing off from the attack target, sets how long we back off
+     */
+    public void startBackOff();
+
+    /**
+     * Checks if our time to back off is over
+     *
+     * @return true if the back-off is over
+     */
+    public boolean isBackOffOver();
+
+    /**
+     * Backs away from the attack target, or stands if it is far enough
+     *
+     * @return false if we can't back away
+     */
+    public boolean backOff();
+
+    /**
+     * A hero set to return to the hero lair withdraws there from a fight when
+     * it is badly hurt. Starts the walk to the hero lair if so
+     *
+     * @return true if we withdraw to the hero lair
+     */
+    public boolean withdrawToHeroLair();
+
+    /**
+     * Walks to a tile of our own land some way off, as a recuperating hero
+     * does until its health is back
+     */
+    public void wanderOnOwnLand();
+
+    public boolean isAttacked();
+
+    public boolean isEnoughSleep();
+
+    public boolean isIncapacitated();
+
+    /**
+     * Is the creature fighting in a Combat Pit
+     *
+     * @return true if dropped into a Combat Pit to fight
+     */
+    public boolean isCombatPitFighter();
+
+    public boolean isTimeToReEvaluate();
+
+    public void resetReEvaluationTimer();
+
+    public int getGold();
+
+    public int getMaxGold();
+
+    public void substractGold(int amount);
+
+    public Point getLairLocation();
+
+    public boolean isUnconscious();
+
+    /**
+     * Wakes up a knocked out creature, like when it is carried to a Lair. It
+     * keeps the health that was left of its dying time
+     */
+    public void wakeUp();
+
+    public Point getCreatureCoordinates();
+
+    public void setAssignedTask(Task task);
+
+    public void executeAssignedTask();
+
+    public Creature getCreature();
+
+    /**
+     * Tells that something happened to the creature type, e.g. it claimed a tile
+     *
+     * @param type the event
+     * @param location the tile where it happened
+     */
+    public void fireEvent(GameEventType type, Point location);
+
+    public void addGold(int amount);
+
+    /**
+     * The keeper pays the creature by hand, by dropping gold on it. The
+     * creature keeps half of the gold, up to what it can carry, and the rest
+     * is gone. However little it got, it is owed nothing more
+     *
+     * @param amount the gold dropped on the creature
+     */
+    public void takePay(int amount);
+
+    public int getObjectiveTargetActionPointId();
+
+    public void setObjectiveTargetActionPointId(int actionPointId);
+
+    public Thing.HeroParty.Objective getObjective();
+
+    public void setObjective(Thing.HeroParty.Objective objective);
+
+    public boolean isDead();
+
+    public boolean isImprisoned();
+
+    public boolean isTortured();
+
+    public boolean isStunned();
+
+    public int getLevel();
+
+    public void attachPortalGem();
+
+    public void setObjectiveTargetPlayerId(short playerId);
+
+    public short getObjectiveTargetPlayerId();
+
+    public void setPlayerObjective(ObjectiveType objective);
+
+    public void setCreatureLair(EntityId lairId);
+
+    /**
+     * Evaluates the time spent in current state and compares it to the
+     * creatures target time in a state. The target time would be set by either
+     * animation or level variable
+     *
+     * @return {@code true} if state should be changed
+     */
+    public boolean isStateTimeExceeded();
+
+    public void sleep();
+
+    /**
+     * Knocks the creature off its feet, it falls back and gets up again like
+     * after being dropped from the hand. Whatever it was doing is dropped. A
+     * creature already down stays down longer. Does nothing to a creature
+     * that is not on its own feet to begin with, i.e. in hand, falling,
+     * possessed or out cold.
+     */
+    public void knockDown();
+
+    /**
+     * Set a target for us to follow
+     *
+     * @param target target to follow
+     */
+    public void setFollowTarget(EntityId target);
+
+    public boolean shouldNavigateToFollowTarget();
+
+    /**
+     * Sends us to a Call to Arms banner, if we can get there
+     *
+     * @param banner the banner
+     * @return true if we answered the call
+     */
+    public boolean answerCallToArms(EntityId banner);
+
+    /**
+     * Gathers at the Call to Arms banner we answered and fights what comes
+     * close to it
+     *
+     * @return false when the banner is gone or we can't get to it
+     */
+    public boolean heedCallToArms();
+
+    public boolean isSlapped();
+
+    public boolean isPortalGemInPosession();
+
+    /**
+     * When a creature is hauled to prison, call this to properly seal the enemy
+     * to the prison
+     *
+     * @param playerId the imprisoner player
+     * @param roomId the room in which to imprison
+     */
+    public void imprison(short playerId, EntityId roomId);
+
+    /**
+     * Is the (neutral) creature claimed
+     *
+     * @return returns {@code true} if the creature is owned by a keeper
+     */
+    public boolean isClaimed();
+
+    public boolean isHungry();
+
+    public boolean goToEat();
+
+    /**
+     * Sends the creature to gamble in the Casino, if it wants to: a keeper's
+     * creature that holds more gold than the stake of the Casino's money mode
+     *
+     * @return {@code true} if the creature was given a place to gamble
+     */
+    public boolean goGambling();
+
+    /**
+     * Sends the creature to collect the pay it is owed, if it is owed any and
+     * it is time to try. A try that finds no gold to collect is counted
+     *
+     * @return true if the creature is on its way to a gold room
+     */
+    public boolean goToCollectPay();
+
+    /**
+     * Makes the creature eat the target
+     *
+     * @param target the devouree
+     */
+    public void eat(IEntityController target);
+
+    /**
+     * Marks that we have eaten a single ration of food
+     */
+    public void sate();
+
+    /**
+     * Sends the creature to collect its jackpot, if it is the big winner of a
+     * Casino
+     *
+     * @return true if the creature was assigned to collect its winnings
+     */
+    public boolean collectWinnings();
+
+    /**
+     * Sends the creature to dance in its keeper's Casino, if one is in disco
+     * mode
+     *
+     * @return true if the creature is in the disco or on its way there
+     */
+    public boolean goToDisco();
+
+    /**
+     * Is the creature standing in its keeper's Casino while it is in disco mode
+     *
+     * @return true if the creature is at the disco
+     */
+    public boolean isAtDisco();
+
+    /**
+     * Makes the creature hungry
+     */
+    public void makeHungry();
+
+    /**
+     * Sets whether the creature will fight. One that won't doesn't start or
+     * join a fight and drops the one it is in, but it can still be attacked
+     *
+     * @param willFight true if the creature may fight
+     */
+    public void setWillFight(boolean willFight);
+
+    /**
+     * Get the research points the creature makes on this game tick in the
+     * library. A slapped creature makes extra points on the first tick of
+     * every second.
+     *
+     * @return research points of this tick
+     */
+    public int getResearchPerTick();
+
+    /**
+     * Get the manufacture points the creature makes on each game tick in the
+     * workshop
+     *
+     * @return manufacture points per tick
+     */
+    public int getManufacturePerTick();
+
+    /**
+     * Gives object to creature
+     *
+     * @param object the object, might be food, gold, or what ever
+     */
+    public void giveObject(IObjectController object);
+
+    public void stopRecuperating();
+
+    /**
+     * Is the creature recuperating safely in its own bed
+     *
+     * @return true if recuperating
+     */
+    public boolean isRecuperating();
+
+    /**
+     * Turns the creature into a chicken for a while, as by the Chicken spell.
+     * Creatures immune to the spell stay as they are
+     *
+     * @param duration how long, in seconds
+     */
+    public void turnIntoChicken(double duration);
+
+    /**
+     * Plays an animation once from its start, such as an outburst
+     *
+     * @param animation the animation
+     */
+    public void playAnimation(Creature.AnimationType animation);
+
+    /**
+     * Sets creature possession on/off
+     *
+     * @param possessed should the creature be posessed or AI driven
+     */
+    public void setPossession(boolean possessed);
+
+    /**
+     * Sets the movement intent for a possessed creature, as steered by its keeper
+     *
+     * @param direction movement direction on the map plane, may be a zero vector
+     * @param rotation the wanted rotation
+     * @param speedMode one of {@link toniarts.openkeeper.game.component.PossessedMovement}'s speed constants
+     */
+    public void setPossessedMovement(Vector2f direction, float rotation, byte speedMode);
+
+    /**
+     * Sets the attack intent for a possessed creature, as given by its keeper.
+     * The swings happen on the game logic thread, see
+     * {@link #executePossessedAttack()}.
+     *
+     * @param attacking whether the attack button is held down
+     */
+    public void setPossessedAttack(boolean attacking);
+
+    /**
+     * Swings the melee attack of a possessed creature, if it has recharged.
+     * Hits the nearest creature in front of it on the tiles around it, or if
+     * there is none, a worker digs the tile it is facing.
+     */
+    public void executePossessedAttack();
+
+    /**
+     * Converts creature to another player's bidding
+     *
+     * @param playerId the new player ID
+     */
+    public void convertCreature(short playerId);
+
+    /**
+     * Makes the creature fight for another player for a while, as by the
+     * Turncoat spell. It stays owned by its keeper. Creatures immune to the
+     * spell stay as they are
+     *
+     * @param playerId the player the creature fights for
+     * @param duration how long, in seconds
+     */
+    public void turncoat(short playerId, double duration);
+
+    /**
+     * Turns on the keeper. Like in DK II, the creature joins the heroes and
+     * goes after the keeper it served
+     */
+    public void rebel();
+
+}

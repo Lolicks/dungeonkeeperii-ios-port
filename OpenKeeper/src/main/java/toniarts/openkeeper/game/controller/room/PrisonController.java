@@ -1,0 +1,169 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.controller.room;
+
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import toniarts.openkeeper.utils.Point;
+import java.util.Collection;
+import toniarts.openkeeper.common.RoomInstance;
+import toniarts.openkeeper.game.controller.IGameTimer;
+import toniarts.openkeeper.game.component.ObjectComponent;
+import toniarts.openkeeper.game.component.PrisonStatus;
+import toniarts.openkeeper.game.controller.IObjectsController;
+import toniarts.openkeeper.game.controller.room.storage.RoomPrisonerControl;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+
+/**
+ * Manages prison. Prison has a special door and special navigation for
+ * creatures.
+ *
+ * @author ArchDemon
+ */
+public final class PrisonController extends DoubleQuadController {
+
+    private static final short OBJECT_DOOR_ID = 109;
+    private static final short OBJECT_DOORBAR_ID = 116;
+
+    private final IGameTimer gameTimer;
+
+    private Point door;
+
+    public PrisonController(EntityId entityId, EntityData entityData, IKwdFile kwdFile, RoomInstance roomInstance, IObjectsController objectsController,
+            IGameTimer gameTimer) {
+        super(entityId, entityData, kwdFile, roomInstance, objectsController, ObjectType.PRISONER);
+
+        this.gameTimer = gameTimer;
+    }
+
+    /**
+     * Tells whether the tile is inside the cage, where the prisoners are
+     * held. Like in DK II (DKII.EXE 0x4E5A70, 0x454110), the tiles around the
+     * cage hold nobody
+     *
+     * @param tile the tile
+     * @return true if the tile is inside the cage
+     */
+    public boolean isCageTile(Point tile) {
+        return insideCoordinates.contains(tile);
+    }
+
+    @Override
+    public void construct() {
+        super.construct();
+
+        // A new Prison is open, like in DK II
+        if (getEntityComponent(PrisonStatus.class) == null) {
+            setOpen(true);
+        }
+
+        addObjectControl(new RoomPrisonerControl(kwdFile, this, entityData, gameTimer) {
+            @Override
+            protected Collection<Point> getCoordinates() {
+
+                // Only the innards of prison can hold objects
+                return insideCoordinates;
+            }
+
+            @Override
+            protected int getNumberOfAccessibleTiles() {
+
+                // One prisoner per inside tile, plus one, like in DK II
+                int insideTiles = getCoordinates().size();
+                return insideTiles > 0 ? insideTiles + 1 : 0;
+            }
+
+            @Override
+            public boolean isFullCapacity() {
+
+                // A closed Prison takes no captives, like in DK II
+                return !isPrisonOpen() || super.isFullCapacity();
+            }
+
+        });
+    }
+
+    @Override
+    public boolean isFullCapacity() {
+        return getObjectControl(ObjectType.PRISONER).isFullCapacity();
+    }
+
+    /**
+     * Opens or closes the Prison. In DK II the keeper does this by clicking
+     * the Prison Door Bar
+     *
+     * @param open true to open the Prison, false to close it
+     */
+    public void setOpen(boolean open) {
+        entityData.setComponent(entityId, new PrisonStatus(open));
+    }
+
+    @Override
+    public boolean switchFurniture(EntityId furniture) {
+        ObjectComponent objectComponent = entityData.getComponent(furniture, ObjectComponent.class);
+        if (objectComponent == null || objectComponent.objectId != OBJECT_DOORBAR_ID) {
+            return false;
+        }
+
+        // The Prison Door Bar opens and closes the Prison, like in DK II
+        setOpen(!isPrisonOpen());
+        return true;
+    }
+
+    @Override
+    protected void constructObjects() {
+        super.constructObjects();
+
+        door = null;
+        for (Point p : roomInstance.getCoordinates()) {
+            if (door == null && insideCoordinates.contains(new Point(p.x, p.y + 1))) {
+                floorFurniture.add(objectsController.loadObject(OBJECT_DOOR_ID, roomInstance.getOwnerId(), p.x, p.y));
+                floorFurniture.add(objectsController.loadObject(OBJECT_DOORBAR_ID, roomInstance.getOwnerId(), p.x, p.y));
+
+                door = p;
+                break;
+            }
+        }
+    }
+
+    @Override
+    public boolean isTileAccessible(Integer fromX, Integer fromY, int toX, int toY) {
+
+        // Prison is all accessible, but you do have to use the door!
+        if (door != null && fromX != null && fromY != null) {
+
+            // Path finding
+            Point from = new Point(fromX, fromY);
+            Point to = new Point(toX, toY);
+            if (insideCoordinates.contains(to) && insideCoordinates.contains(from)) {
+                return true; // Inside the prison == free movement
+            } else if (insideCoordinates.contains(from) && to.equals(door)) {
+                return true; // From inside also through the door
+            } else if (insideCoordinates.contains(to) && from.equals(door)) {
+                return true; // Path finding, from outside
+            } else if (!insideCoordinates.contains(to) && !insideCoordinates.contains(from)) {
+                return true; // Outside the prison == free movement
+            }
+            return false;
+        }
+        if (fromX == null && fromY == null && door != null) {
+            return true; // We have a door, the tile is accessible
+        }
+        return super.isTileAccessible(fromX, fromY, toX, toY);
+    }
+
+}

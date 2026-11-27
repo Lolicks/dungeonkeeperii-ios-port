@@ -1,0 +1,457 @@
+/*
+ * Copyright (C) 2014-2017 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.view;
+
+import com.jme3.app.Application;
+import com.jme3.app.state.AbstractAppState;
+import com.jme3.app.state.AppState;
+import com.jme3.math.ColorRGBA;
+import com.jme3.app.state.AppStateManager;
+import com.jme3.asset.AssetManager;
+import com.jme3.scene.Node;
+import com.jme3.scene.Spatial;
+import com.simsilica.event.EventBus;
+import com.simsilica.event.EventListener;
+import com.simsilica.event.EventType;
+import toniarts.openkeeper.game.event.ClientEvents;
+import toniarts.openkeeper.game.event.GameEvent;
+import toniarts.openkeeper.view.effect.RoomActionEffects;
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import toniarts.openkeeper.Main;
+import toniarts.openkeeper.game.data.Keeper;
+import toniarts.openkeeper.game.data.Settings;
+import toniarts.openkeeper.game.event.GameEventType;
+import toniarts.openkeeper.game.listener.MapListener;
+import toniarts.openkeeper.game.listener.PlayerActionListener;
+import toniarts.openkeeper.game.map.IMapInformation;
+import toniarts.openkeeper.game.map.IMapTileInformation;
+import toniarts.openkeeper.game.map.IRoomsInformation;
+import toniarts.openkeeper.game.map.MapInformation;
+import toniarts.openkeeper.game.sound.GameEventSoundPlayer;
+import toniarts.openkeeper.game.state.SoundState;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+import toniarts.openkeeper.tools.modelviewer.Debug;
+import toniarts.openkeeper.utils.Point;
+import toniarts.openkeeper.utils.WorldUtils;
+import toniarts.openkeeper.view.effect.EffectManagerState;
+import toniarts.openkeeper.view.fogofwar.FogOfWarController;
+import toniarts.openkeeper.view.fogofwar.IFogOfWarInformation;
+import toniarts.openkeeper.view.map.FlashTileViewState;
+import toniarts.openkeeper.view.map.MapRoomContainer;
+import toniarts.openkeeper.view.map.MapTileContainer;
+import toniarts.openkeeper.view.map.MapTileEffectTracker;
+import toniarts.openkeeper.view.map.MapViewController;
+import toniarts.openkeeper.view.map.TerrainDeformer;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+
+/**
+ * Handles the handling of game world for a player, visually
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public abstract class PlayerMapViewState extends AbstractAppState implements MapListener, PlayerActionListener, EventListener<GameEvent> {
+
+    private static final int CASINO_JACKPOT_EFFECT = 91;
+    private static final int CASINO_FIREWORKS_EFFECT = 320;
+
+    private Main app;
+    private AppStateManager stateManager;
+    private final IMapInformation mapInformation;
+    private final MapViewController mapLoader;
+    private final IKwdFile kwdFile;
+    private final AssetManager assetManager;
+    private final MapTileContainer mapTileContainer;
+    private Node worldNode;
+    private final EffectManagerState effectManager;
+    private final FlashTileViewState flashTileControl;
+    private final MapRoomContainer mapRoomContainer;
+    private MapTileEffectTracker tileEffects;
+    private final FogOfWarController fogOfWarController;
+    private final GameEventSoundPlayer gameEventSoundPlayer;
+    private final DiscoViewState discoViewState;
+    private final EventListener<GameEvent> casinoEffectsListener = this::onCasinoEvent;
+
+    // Tile updates (the fog seeding, fog changes from the server) that came
+    // while the map was still loading. Render thread only
+    private final Set<Point> pendingTileUpdates = new HashSet<>();
+
+    // Takes in the map entities until the map is complete, see initialize()
+    private final AppState mapEntityLoader = new AbstractAppState() {
+
+        @Override
+        public void update(float tpf) {
+            mapRoomContainer.update();
+            mapTileContainer.update();
+            if (tileEffects != null) {
+                stateManager.detach(this);
+            }
+        }
+
+    };
+
+    protected PlayerMapViewState(Main app, final IKwdFile kwdFile, final AssetManager assetManager, Collection<Keeper> players, EntityData entityData, short playerId, boolean ceilingEnabled, ILoadCompleteNotifier loadCompleteNotifier, Consumer<EntityId> enemySightedNotifier) {
+        this.app = app;
+        this.kwdFile = kwdFile;
+        this.assetManager = assetManager;
+
+        // We don't update anything until the map has loaded, we enable ourselves then
+        setEnabled(false);
+
+        // World node
+        worldNode = new Node("World");
+        if (Main.isDebug()) {
+            Debug.showNodeAxes(assetManager, worldNode, 10);
+        }
+
+        // Load and update rooms
+        mapRoomContainer = new MapRoomContainer(entityData, kwdFile);
+
+        // Make sure we load the whole map before we continue
+        mapTileContainer = new MapTileContainer(entityData, kwdFile, this::updateTiles) {
+
+            @Override
+            protected void onLoadComplete() {
+
+                // Fog must be seeded before the initial geometry is built, since
+                // the renderer consults it while assembling the map
+                fogOfWarController.seedLevelStart();
+
+                // Snapshot terrain and ownership before rendering any transitions.
+                tileEffects = new MapTileEffectTracker(this, kwdFile, fogOfWarController,
+                        effectManager, worldNode);
+
+                // Build the map on its own thread, we might be on the render
+                // thread, and the client carries on setting up its other states
+                Thread mapLoaderThread = new Thread(() -> {
+
+                    Spatial map = mapLoader.load(assetManager, kwdFile);
+
+                    // The loader is done with the map (and its light rules), from
+                    // here on they are only touched on the render thread
+                    app.enqueue(() -> {
+                        worldNode.attachChild(map);
+
+                        // Start updating, and refresh the tiles that changed while
+                        // we were loading
+                        setEnabled(true);
+                        if (!pendingTileUpdates.isEmpty()) {
+                            updateTiles(pendingTileUpdates.toArray(new Point[0]));
+                            pendingTileUpdates.clear();
+                        }
+
+                        loadCompleteNotifier.onLoadComplete();
+                    });
+                }, "GameClientMapLoader");
+                mapLoaderThread.start();
+            }
+
+        };
+
+        mapInformation = new MapInformation(mapTileContainer, kwdFile, players);
+
+        fogOfWarController = new FogOfWarController(entityData, kwdFile, mapTileContainer, playerId,
+                this::updateTiles, enemySightedNotifier);
+
+        // Effect manager
+        effectManager = new EffectManagerState(kwdFile, assetManager);
+
+        // Create the actual map
+        mapLoader = new MapViewController(assetManager, kwdFile, mapInformation, fogOfWarController, playerId,
+                Main.getUserSettings().getBoolean(Settings.Setting.TORCHES_ENABLED), ceilingEnabled) {
+
+            @Override
+            protected void updateProgress(float progress) {
+                PlayerMapViewState.this.updateProgress(progress);
+            }
+
+        };
+
+        // The ceiling is only shown while possessing a creature
+        mapLoader.setCeilingVisible(false);
+
+        flashTileControl = new FlashTileViewState(mapLoader);
+
+        gameEventSoundPlayer = new GameEventSoundPlayer(kwdFile,
+                speech -> stateManager.getState(SoundState.class)
+                        .attachMentorSpeech(speech, () -> {
+                            SystemMessageState messages = stateManager.getState(SystemMessageState.class);
+                            if (messages != null) {
+                                messages.addMessage(SystemMessageState.MessageType.INFO,
+                                        String.format("${speech.%d}", speech - 1));
+                            }
+                        }));
+        discoViewState = new DiscoViewState(kwdFile, fogOfWarController::isExplored);
+
+        // Start collecting the map entities. In a local game the whole map is
+        // there already and start() loads it, over the network see initialize()
+        mapRoomContainer.start();
+        mapTileContainer.start();
+        fogOfWarController.start();
+    }
+
+    @Override
+    public void initialize(final AppStateManager stateManager, final Application app) {
+        super.initialize(stateManager, app);
+        this.app = (Main) app;
+        this.stateManager = stateManager;
+
+        // Over the network the map entities come in batches. We don't update
+        // before the map has loaded, so the loader takes them in until then
+        if (tileEffects == null) {
+            this.stateManager.attach(mapEntityLoader);
+        }
+
+        // Effects
+        this.stateManager.attach(effectManager);
+
+        // Sounds
+        this.gameEventSoundPlayer.register();
+        EventBus.addListener(ClientEvents.GAME_EVENT, this);
+        EventBus.addListener(ClientEvents.GAME_EVENT, casinoEffectsListener);
+        this.stateManager.attach(discoViewState);
+
+        // Tile flash state
+        this.stateManager.attach(flashTileControl);
+
+        // Attach the world
+        this.app.getRootNode().attachChild(worldNode);
+
+        // Lighting: the cursor light lives as long as the world does
+        mapLoader.getLightRules().createCursorLight();
+    }
+
+    @Override
+    public void cleanup() {
+        EventBus.removeListener(ClientEvents.GAME_EVENT, this);
+
+        // Lighting
+        mapLoader.getLightRules().destroyCursorLight();
+
+        // Detach our map
+        if (worldNode != null) {
+            app.getRootNode().detachChild(worldNode);
+            worldNode = null;
+        }
+
+        // Tile flash state
+        stateManager.detach(flashTileControl);
+
+        // In case we are still loading
+        stateManager.detach(mapEntityLoader);
+
+        // Effects
+        stateManager.detach(effectManager);
+
+        // Sounds
+        this.gameEventSoundPlayer.unregister();
+        EventBus.removeListener(ClientEvents.GAME_EVENT, casinoEffectsListener);
+        stateManager.detach(discoViewState);
+
+        // The actual map data
+        mapRoomContainer.stop();
+        mapTileContainer.stop();
+        fogOfWarController.stop();
+
+        super.cleanup();
+    }
+
+    @Override
+    public void update(float tpf) {
+
+        // Always process rooms before the map tiles, and the fog of war after
+        // the map is up to date
+        mapRoomContainer.update();
+        mapTileContainer.update();
+        fogOfWarController.update(tpf);
+
+        // Lighting: pick up live settings changes, advance modulators
+        // (pulse/fade/flicker) and re-upload the terrain materials they
+        // touched
+        Settings settings = Main.getUserSettings();
+        float ambient = settings.getFloat(Settings.Setting.AMBIENT_LIGHT);
+        mapLoader.getLightRules().setGlobalAmbient(new ColorRGBA(ambient, ambient, ambient, 1f));
+        mapLoader.getLightRules().setCheapLighting(settings.getBoolean(Settings.Setting.CHEAP_LIGHTING));
+        mapLoader.getLightRules().update(tpf, app.getCamera());
+    }
+
+    public MapViewController getMapLoader() {
+        return mapLoader;
+    }
+
+    /**
+     * The visual effects of the Casino's jackpot party, the sounds are played by {@link GameEventSoundPlayer}.
+     */
+    private void onCasinoEvent(EventType<GameEvent> type, GameEvent event) {
+        if (event.type == GameEventType.CASINO_JACKPOT) {
+            app.enqueue(() -> effectManager.load(worldNode, WorldUtils.pointToVector3f(event.position).addLocal(0, WorldUtils.FLOOR_HEIGHT, 0),
+                    CASINO_JACKPOT_EFFECT, false));
+        } else if (event.type == GameEventType.CASINO_FIREWORKS) {
+            app.enqueue(() -> effectManager.load(worldNode, WorldUtils.pointToVector3f(event.position).addLocal(0, WorldUtils.TILE_HEIGHT, 0),
+                    CASINO_FIREWORKS_EFFECT, false));
+        }
+    }
+
+    /**
+     * {@code false} while the "GameClientMapLoader" background thread is
+     * still populating {@code mapLoader}'s {@code LightRules} (registering
+     * terrain materials, torches, etc.). We are disabled until then. Anything
+     * outside this class that touches {@code LightRules} on the render thread
+     * (entity/effect flat lighting) must gate on this, or it races those
+     * writes with a {@code ConcurrentModificationException}. Render thread
+     * only.
+     *
+     * @return whether the map has been loaded
+     */
+    public boolean isMapLoaded() {
+        return isEnabled();
+    }
+
+    public AssetManager getAssetManager() {
+        return assetManager;
+    }
+
+    /**
+     * If you want to monitor the map loading progress, use this method
+     *
+     * @param progress current progress from 0.0 to 1.0
+     */
+    protected abstract void updateProgress(final float progress);
+
+    @Override
+    public void newEvent(EventType<GameEvent> type, GameEvent event) {
+        RoomActionEffects.Request request = RoomActionEffects.resolve(event, kwdFile);
+        if (request == null) {
+            return;
+        }
+        // Events can arrive on the network/logic thread. Scene changes belong to the renderer.
+        app.enqueue(() -> {
+            if (worldNode == null || !isMapLoaded() || !fogOfWarController.isVisible(event.position)) {
+                return;
+            }
+            var position = WorldUtils.pointToVector3f(event.position);
+            position.y = request.height();
+            if (request.goldValue() != null) {
+                effectManager.loadGoldValue(worldNode, position, request.goldValue(), app.getCamera());
+            } else {
+                effectManager.load(worldNode, position, request.effectId(), false);
+            }
+        });
+    }
+
+    @Override
+    public void onTilesChange(List<Point> updatedTiles) {
+        fogOfWarController.onTileOwnerChanged(updatedTiles);
+    }
+
+    @Override
+    public void onBuild(short keeperId, List<Point> tiles) {
+        fogOfWarController.onRoomBuilt(keeperId, tiles);
+    }
+
+    @Override
+    public void onSold(short keeperId, List<Point> tiles) {
+
+        // Not wired: by the time this fires the terrain has typically already
+        // reverted to non-room, so the room's TileConstruction
+    }
+
+    @Override
+    public void onTileFlash(List<Point> points, boolean enabled, short keeperId) {
+        flashTileControl.attach(points, enabled);
+    }
+
+    @Override
+    public void onFogOfWarDisabled(short keeperId) {
+        fogOfWarController.disableFogOfWar();
+    }
+
+    @Override
+    public void onFogOfWarReset(short keeperId) {
+        fogOfWarController.resetToLevelStart();
+    }
+
+    @Override
+    public void onTilesReveal(List<Point> points, boolean explore, short keeperId) {
+        fogOfWarController.revealActionPointTiles(points, explore);
+    }
+
+    @Override
+    public void onSightOfEvil(Point centre, int radius, int durationTicks, short keeperId) {
+
+        // Fog of war is only touched on the render thread
+        app.enqueue(() -> fogOfWarController.startSightOfEvil(centre, radius, durationTicks));
+    }
+
+    public IMapInformation getMapInformation() {
+        return mapInformation;
+    }
+
+    public IFogOfWarInformation getFogOfWarInformation() {
+        return fogOfWarController;
+    }
+
+    public void markPendingTaggedTiles(List<Point> points, boolean tagged) {
+        fogOfWarController.markPendingTagged(points, tagged);
+    }
+
+    public void setCeilingVisible(boolean visible) {
+        mapLoader.setCeilingVisible(visible);
+    }
+
+    public void setPossessedCreature(EntityId entityId) {
+        fogOfWarController.setPossessedCreature(entityId);
+    }
+
+    public void addFogOfWarTilesDirtyListener(Consumer<Point[]> listener) {
+        fogOfWarController.addTilesDirtyListener(listener);
+    }
+
+    private void updateTiles(Point[] points) {
+        app.enqueue(() -> {
+            if (!isEnabled()) {
+
+                // Still loading, there is no map to update yet
+                pendingTileUpdates.addAll(Arrays.asList(points));
+                return;
+            }
+            tileEffects.update(points);
+            mapLoader.updateTiles(points);
+        });
+    }
+
+    public TerrainDeformer getTerrainDeformer() {
+        return mapLoader.getDeformer();
+    }
+
+    public IRoomsInformation getRoomsInformation() {
+        return mapRoomContainer;
+    }
+
+    public interface ILoadCompleteNotifier {
+
+        void onLoadComplete();
+
+    }
+
+}

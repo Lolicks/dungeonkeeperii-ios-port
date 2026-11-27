@@ -1,0 +1,114 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.controller.room;
+
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import toniarts.openkeeper.utils.Point;
+import toniarts.openkeeper.common.RoomInstance;
+import toniarts.openkeeper.game.component.CreatureGenerator;
+import toniarts.openkeeper.game.controller.IObjectsController;
+import toniarts.openkeeper.game.controller.IGameTimer;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+
+/**
+ * Portal is the only one I think
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class ThreeByThreeController extends AbstractRoomController implements ICreatureEntrance {
+
+    private final IGameTimer gameTimer;
+
+    public ThreeByThreeController(EntityId entityId, EntityData entityData, IKwdFile kwdFile, RoomInstance roomInstance, IObjectsController objectsController, IGameTimer gameTimer) {
+        super(entityId, entityData, kwdFile, roomInstance, objectsController, null);
+
+        this.gameTimer = gameTimer;
+        // Start a new Portal clock, preserving existing state when rebuilding its controller.
+        if (entityData.getComponent(entityId, CreatureGenerator.class) == null) {
+            entityData.setComponent(entityId, new CreatureGenerator(roomInstance.getCenter(), gameTimer.getGameTime()));
+        }
+    }
+
+    @Override
+    public boolean isTileAccessible(Integer fromX, Integer fromY, int toX, int toY) {
+
+        // The center tile is not accessible
+        Point roomPoint = roomInstance.worldCoordinateToLocalCoordinate(toX, toY);
+        return !(roomPoint.x == 1 && roomPoint.y == 1);
+    }
+
+    @Override
+    public Point getEntranceCoordinate() {
+        return roomInstance.getCenter();
+    }
+
+    /**
+     * Whether a creature dropped on the tile leaves the dungeon. Like in DK II,
+     * a creature that lands on the middle tile of its own keeper's portal is
+     * gone for good, only imps stay.
+     *
+     * @param tile the tile the creature is dropped on
+     * @param creatureOwnerId the owner of the creature
+     * @param imp whether the creature is an imp
+     * @return whether the creature leaves the dungeon
+     */
+    public boolean isLeavingDungeon(Point tile, short creatureOwnerId, boolean imp) {
+        return !imp && getOwnerId() == creatureOwnerId && roomInstance.getCenter().equals(tile);
+    }
+
+    @Override
+    public double getLastSpawnTime() {
+        return getEntityComponent(CreatureGenerator.class).lastSpawnTime;
+    }
+
+    @Override
+    public void onSpawn(double time, EntityId spawnedEntityId) {
+        CreatureGenerator generator = getEntityComponent(CreatureGenerator.class);
+        entityData.setComponent(this.entityId, new CreatureGenerator(roomInstance.getCenter(), time,
+                generator.generatedCount + 1, generator.lastPreparationTime));
+    }
+
+    @Override
+    public int getGeneratedCount() {
+        return getEntityComponent(CreatureGenerator.class).generatedCount;
+    }
+
+    @Override
+    public boolean onPrepareSpawn(double preparationTime) {
+        CreatureGenerator generator = getEntityComponent(CreatureGenerator.class);
+        if (generator.lastPreparationTime == preparationTime) {
+            return false;
+        }
+        entityData.setComponent(entityId, new CreatureGenerator(generator.entrance, generator.lastSpawnTime,
+                generator.generatedCount, preparationTime));
+        return true;
+    }
+
+    @Override
+    public void onGenerationCycle(double time) {
+        CreatureGenerator generator = getEntityComponent(CreatureGenerator.class);
+        entityData.setComponent(entityId, new CreatureGenerator(roomInstance.getCenter(), time,
+                generator.generatedCount, generator.lastPreparationTime));
+    }
+
+    @Override
+    public void captured(short playerId) {
+        super.captured(playerId);
+        entityData.setComponent(entityId, new CreatureGenerator(roomInstance.getCenter(), gameTimer.getGameTime()));
+    }
+}

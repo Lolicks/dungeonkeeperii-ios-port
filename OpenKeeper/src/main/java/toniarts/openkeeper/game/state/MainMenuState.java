@@ -1,0 +1,944 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.state;
+
+import com.jme3.app.Application;
+import com.jme3.app.state.AbstractAppState;
+import com.jme3.app.state.AppStateManager;
+import com.jme3.asset.AssetManager;
+import com.jme3.asset.TextureKey;
+import com.jme3.cinematic.events.CinematicEvent;
+import com.jme3.cinematic.events.CinematicEventListener;
+import com.jme3.input.InputManager;
+import com.jme3.math.ColorRGBA;
+import com.jme3.math.Vector3f;
+import com.jme3.renderer.Camera;
+import com.jme3.scene.Node;
+import com.jme3.scene.Spatial;
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import com.simsilica.es.base.DefaultEntityData;
+import toniarts.openkeeper.Main;
+import toniarts.openkeeper.cinematics.CameraSweepData;
+import toniarts.openkeeper.cinematics.CameraSweepDataEntry;
+import toniarts.openkeeper.cinematics.Cinematic;
+import toniarts.openkeeper.game.MapSelector;
+import toniarts.openkeeper.game.event.GameEvent;
+import toniarts.openkeeper.game.controller.GameController;
+import toniarts.openkeeper.game.data.CampaignLevel;
+import toniarts.openkeeper.game.data.GameResult;
+import toniarts.openkeeper.game.data.GeneralLevel;
+import toniarts.openkeeper.game.data.Settings;
+import toniarts.openkeeper.game.data.Settings.Setting;
+import toniarts.openkeeper.game.event.GameEventType;
+import toniarts.openkeeper.game.network.chat.ChatClientService;
+import toniarts.openkeeper.game.sound.FrontEndSounds;
+import toniarts.openkeeper.game.sound.SoundCategory;
+import toniarts.openkeeper.game.sound.SoundEngine;
+import toniarts.openkeeper.game.sound.SoundManager;
+import toniarts.openkeeper.game.state.ConnectionState.ConnectionErrorListener;
+import toniarts.openkeeper.game.state.loading.SingleBarLoadingState;
+import toniarts.openkeeper.game.state.lobby.LobbyClientService;
+import toniarts.openkeeper.game.state.lobby.LobbyService;
+import toniarts.openkeeper.game.state.lobby.LobbyState;
+import toniarts.openkeeper.game.state.lobby.LocalLobby;
+import toniarts.openkeeper.game.state.session.LocalGameSession;
+import toniarts.openkeeper.game.state.session.PlayerService;
+import toniarts.openkeeper.gui.CursorFactory;
+import toniarts.openkeeper.tools.convert.AssetsConverter;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+import toniarts.openkeeper.tools.convert.map.IKwdMap;
+import toniarts.openkeeper.tools.convert.map.KwdFile;
+import toniarts.openkeeper.tools.convert.map.Player;
+import toniarts.openkeeper.tools.convert.map.TriggerAction;
+import toniarts.openkeeper.utils.AssetUtils;
+import toniarts.openkeeper.utils.PathUtils;
+import toniarts.openkeeper.utils.Point;
+import toniarts.openkeeper.utils.WorldUtils;
+import toniarts.openkeeper.video.MovieState;
+import toniarts.openkeeper.view.PlayerEntityViewState;
+import toniarts.openkeeper.view.effect.EffectManagerState;
+import toniarts.openkeeper.view.lighting.LightRules;
+import toniarts.openkeeper.view.map.MapViewController;
+import toniarts.openkeeper.view.map.construction.HeroGateFrontEndConstructor;
+import toniarts.openkeeper.view.text.TextParser;
+import toniarts.openkeeper.view.text.TextParserService;
+
+import java.io.File;
+import java.io.IOException;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
+import java.util.Collections;
+
+import static toniarts.openkeeper.Main.getDkIIFolder;
+
+/**
+ * The main menu state
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class MainMenuState extends AbstractAppState {
+
+    private static final Logger logger = System.getLogger(MainMenuState.class.getName());
+
+    /** Shown for a map that has no thumbnail, at its original's size of 128 pixels */
+    static final String NO_THUMBNAIL = "Textures/Unique_NoTextureName.png";
+    static final int NO_THUMBNAIL_SIZE = 128;
+
+    protected Main app;
+    protected Node rootNode;
+    protected AssetManager assetManager;
+    protected AppStateManager stateManager;
+    protected InputManager inputManager;
+    private final MainMenuScreenController screen;
+    protected Node menuNode;
+    protected GeneralLevel selectedLevel;
+    private final FrontEndSounds frontEndSounds = new FrontEndSounds();
+    private int levelBriefing = SoundEngine.NO_HANDLE;
+    private int levelDebriefing = SoundEngine.NO_HANDLE;
+    private boolean pendingDebriefing;
+    private Camera storedCamera;
+
+    /**
+     * The level that was just played and for which we show the debriefing. Unlike {@link #selectedLevel}
+     * (which is only set for campaign/MPD selection) this is set for every game mode, including skirmish and
+     * multiplayer.
+     */
+    private IKwdFile debriefingLevel;
+    private CampaignLevel debriefingCampaignLevel;
+    private boolean debriefingLevelWon;
+
+    /**
+     * The campaign level that was just won and for which the level cutscene (mentor speech + movie)
+     * needs to be shown before the debriefing screen. {@code null} if there is nothing to show.
+     */
+    private CampaignLevel pendingCutsceneLevel;
+
+    private IKwdFile frontEndKwd;
+    final MainMenuInteraction listener;
+    private Vector3f startLocation;
+    MapSelector mapSelector;
+    private EntityData mainMenuEntityData;
+    private MainMenuEntityViewState mainMenuEntityViewState;
+    private EffectManagerState effectManagerState;
+    private GameController gameController;
+    private volatile MapViewController mapViewController;
+    private final MainMenuConnectionErrorListener connectionErrorListener = new MainMenuConnectionErrorListener();
+
+    /**
+     * (c) Construct a MainMenuState, you should only have one of these. Disable when not in use.
+     *
+     * @param enabled whether to load the menu scene now, or later when needed (has its own loading screen
+     * here)
+     * @param assetManager asset manager for loading the screen
+     * @param app the main application
+     * @throws java.io.IOException may fail to load the main menu map scene
+     */
+    public MainMenuState(final boolean enabled, final AssetManager assetManager, final Main app)
+            throws IOException {
+
+        listener = new MainMenuInteraction(this);
+        super.setEnabled(enabled);
+
+        if (enabled) {
+            loadMenuScene(null, assetManager, app);
+        }
+
+        screen = new MainMenuScreenController(this, app.getNifty());
+        app.getNifty().registerScreenController(screen);
+    }
+
+    /**
+     * Loads up the main menu 3D scene
+     *
+     * @param loadingScreen optional loading screen
+     * @param assetManager asset manager
+     */
+    private void loadMenuScene(final SingleBarLoadingState loadingScreen, final AssetManager assetManager,
+            final Main app) throws IOException {
+        // On the direct startup path this runs from the constructor, before the
+        // state is attached and initialize() sets this field, yet refreshCampaignMap()
+        // below already needs it
+        this.assetManager = assetManager;
+
+        // Load the 3D Front end
+        frontEndKwd = KwdFile.load("FrontEnd3DLevel");
+        if (loadingScreen != null) {
+            loadingScreen.setProgress(0.25f);
+        }
+        AssetUtils.prewarmAssets(frontEndKwd, assetManager, app);
+
+        // Load 3D Front end sound
+        SoundCategory.load(frontEndKwd.getGameLevel().getSoundCategory(), false);
+
+        // Attach the 3D Front end
+        mainMenuEntityData = new DefaultEntityData();
+        menuNode = new Node("Main menu");
+        gameController = new GameController(frontEndKwd, Collections.emptyList(), mainMenuEntityData, frontEndKwd.getVariables(), new MainMenuPlayerService());
+        gameController.createNewGame();
+
+        // Create the actual map
+        // DKII generates room torch lights and optional meshes in the front end too.
+        // Keep the cave ceiling off for this fixed-camera scene.
+        MapViewController mapLoader = new MapViewController(assetManager, frontEndKwd,
+                gameController.getGameWorldController().getMapController(), Player.KEEPER1_ID, true, true, false) {
+
+            @Override
+            protected void updateProgress(float progress) {
+                if (loadingScreen != null) {
+                    loadingScreen.setProgress(0.25f + progress * 0.75f);
+                }
+            }
+
+        };
+        menuNode.attachChild(mapLoader.load(assetManager, frontEndKwd));
+
+        // No fog of war here, so the whole scene is lit; update() drives the lights.
+        // Published only once the load is done (the load may run on a loader thread).
+        mapViewController = mapLoader;
+
+        // Reflect current campaign progress (playable levels / arrow wiring) as soon
+        // as the menu scene exists, not only on first visit to selectCampaignLevel.
+        refreshCampaignMap();
+
+        if (loadingScreen != null) {
+            loadingScreen.setProgress(1.0f);
+        }
+        mainMenuEntityViewState = new MainMenuEntityViewState(frontEndKwd, assetManager, mainMenuEntityData, Player.KEEPER1_ID, new TextParserService(gameController.getGameWorldController().getMapController(), null), menuNode);
+        mainMenuEntityViewState.setEnabled(false);
+        app.getStateManager().attach(mainMenuEntityViewState);
+
+        // Effects (currently just the hero gate's gem holder swirl, spawned
+        // by PlayerEntityViewState/MainMenuEntityViewState's RoomEffectContainer
+        // once HeroGateFrontEndController's RoomEffect component appears)
+        effectManagerState = new EffectManagerState(frontEndKwd, assetManager);
+        // No PlayerMapViewState in the menu, the effects are lit by the menu map's own light rules
+        effectManagerState.setLightRulesSupplier(() -> {
+            MapViewController controller = mapViewController;
+            return controller != null ? controller.getLightRules() : null;
+        });
+        app.getStateManager().attach(effectManagerState);
+
+        // Init the skirmish and multiplayer maps selector
+        mapSelector = new MapSelector();
+    }
+
+    @Override
+    public void update(float tpf) {
+        super.update(tpf);
+
+        // The terrain materials are only lit once the light data is uploaded every
+        // frame (flicker, pulse, ...), as PlayerMapViewState does
+        MapViewController controller = mapViewController;
+        if (controller != null && isEnabled() && app != null) {
+            Settings settings = Main.getUserSettings();
+            float ambient = settings.getFloat(Setting.AMBIENT_LIGHT);
+            controller.getLightRules().setGlobalAmbient(new ColorRGBA(ambient, ambient, ambient, 1f));
+            controller.getLightRules().setCheapLighting(settings.getBoolean(Setting.CHEAP_LIGHTING));
+            controller.getLightRules().update(tpf, app.getCamera());
+
+            // Every animation change loads a new creature model, light them like creatures in the game
+            Spatial mpdCreature = menuNode.getChild(HeroGateFrontEndConstructor.MPD_CREATURE_NODE_NAME);
+            if (mpdCreature != null) {
+                AssetUtils.applyVertexLight(assetManager, mpdCreature, controller.getLightRules(), false, false);
+            }
+        }
+    }
+
+    @Override
+    public void initialize(AppStateManager stateManager, Application app) {
+        super.initialize(stateManager, app);
+        this.app = (Main) app;
+        rootNode = this.app.getRootNode();
+        assetManager = this.app.getAssetManager();
+        this.stateManager = this.app.getStateManager();
+        inputManager = this.app.getInputManager();
+    }
+
+    /**
+     * Load the initial main menu camera position
+     *
+     * @param restoreCamera if true, restore the camera position saved when the menu was disabled, otherwise reset to the default start location
+     */
+    private void loadCameraStartLocation(boolean restoreCamera) {
+        if (restoreCamera && storedCamera != null) {
+            Camera cam = app.getCamera();
+            cam.setFrame(storedCamera.getLocation(), storedCamera.getRotation());
+            cam.setFrustum(storedCamera.getFrustumNear(), storedCamera.getFrustumFar(), storedCamera.getFrustumLeft(),
+                    storedCamera.getFrustumRight(), storedCamera.getFrustumTop(), storedCamera.getFrustumBottom());
+            storedCamera = null;
+            return;
+        }
+        storedCamera = null;
+
+        Player player = frontEndKwd.getPlayer(Player.KEEPER1_ID);
+        startLocation = WorldUtils.pointToVector3f(player.getStartingCameraX(), player.getStartingCameraY());
+        startLocation.addLocal(0, WorldUtils.FLOOR_HEIGHT, 0);
+
+        // Set the actual camera location
+        loadCameraStartLocation("EnginePath250");
+    }
+
+    /**
+     * Loads and sets up the starting camera position from the given transition
+     *
+     * @param transition the transition
+     */
+    private void loadCameraStartLocation(String transition) {
+        CameraSweepData csd = AssetUtils.loadCameraSweep(assetManager, transition);
+        CameraSweepDataEntry entry = csd.getEntries().get(0);
+        Cinematic.applyCameraSweepEntry(app.getCamera(), startLocation, entry, app.getListener());
+    }
+
+    @Override
+    public void cleanup() {
+        mapViewController = null;
+        if (mainMenuEntityViewState != null) {
+            stateManager.detach(mainMenuEntityViewState);
+            mainMenuEntityViewState = null;
+        }
+
+        if (effectManagerState != null) {
+            stateManager.detach(effectManagerState);
+            effectManagerState = null;
+        }
+
+        // Clear sound
+        frontEndSounds.stop();
+        clearLevelBriefingNarration();
+
+        // Detach our start menu
+        if (menuNode != null) {
+            rootNode.detachChild(menuNode);
+            menuNode = null;
+        }
+
+        shutdownMultiplayer();
+
+        if (gameController != null) {
+            gameController.stop();
+            gameController = null;
+        }
+
+        super.cleanup();
+    }
+
+    /**
+     * Initialize the start menu, sets the menu scene in place & sets the controls and start screen
+     */
+    private void initializeMainMenu() {
+
+        // Set the processors & scene
+        mainMenuEntityViewState.setEnabled(true);
+        MainMenuState.this.app.setViewProcessors();
+        rootNode.attachChild(menuNode);
+
+        boolean debriefing = pendingDebriefing;
+
+        app.enqueue(() -> {
+
+            // Start screen, do this here since another state may have just changed to empty screen -> have to do it like this, delayed
+            if (debriefing) {
+                pendingDebriefing = false;
+                CampaignLevel cutsceneLevel = pendingCutsceneLevel;
+                pendingCutsceneLevel = null;
+                MainMenuScreenController.Cutscene cutscene = (cutsceneLevel != null)
+                        ? MainMenuScreenController.getCutscene(cutsceneLevel.getLevel()) : null;
+                if (cutscene != null) {
+                    playLevelWonCutscene(cutscene);
+                } else {
+                    MainMenuState.this.screen.showDebriefing();
+                }
+            } else {
+                MainMenuState.this.screen.goToScreen(MainMenuScreenController.SCREEN_START_ID);
+            }
+            return null;
+        });
+
+        // Enable cursor
+        app.getInputManager().setCursorVisible(true);
+        if (Main.getUserSettings().getBoolean(Settings.Setting.USE_CURSORS)) {
+            app.getInputManager().setMouseCursor(CursorFactory.getCursor(CursorFactory.CursorType.POINTER, assetManager));
+        }
+
+        // Set the camera position
+        loadCameraStartLocation(debriefing);
+    }
+
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+
+        if (!isInitialized()) {
+            return;
+        }
+
+        stateManager.getState(SoundState.class).changeBackground(SoundState.Background.AMBIENCE);
+        stateManager.getState(SoundState.class).setEnabled(true);
+
+        if (enabled) {
+            frontEndSounds.start();
+
+            // If this is the first time, we might have to load the menu
+            if (menuNode == null) {
+
+                // Set up the loading screen
+                SingleBarLoadingState loader = new SingleBarLoadingState(app, "Single Loading") {
+
+                    @Override
+                    public void onLoad() {
+                        try {
+                            loadMenuScene(this, MainMenuState.this.assetManager, MainMenuState.this.app);
+                        } catch (IOException ex) {
+                            logger.log(Level.ERROR, "Failed to load the main menu scene!", ex);
+                        }
+                    }
+
+                    @Override
+                    public void onLoadComplete() {
+                        initializeMainMenu();
+                    }
+                };
+                stateManager.attach(loader);
+            } else {
+                initializeMainMenu();
+            }
+        } else {
+            frontEndSounds.stop();
+
+            // Save the camera position so that we can restore it (e.g. for the debriefing screen) when re-enabling the menu
+            storedCamera = app.getCamera().clone();
+
+            stateManager.getState(MainMenuEntityViewState.class).setEnabled(false);
+            if (menuNode != null && rootNode != null) {
+
+                // Detach our start menu
+                rootNode.detachChild(menuNode);
+            }
+
+            screen.goToScreen(IMainMenuScreenController.SCREEN_EMPTY_ID);
+        }
+    }
+
+    protected void createLocalLobby() {
+        LocalLobby localLobby = new LocalLobby();
+        initLobby(false, null, localLobby, localLobby, false);
+    }
+
+    public void multiplayerCreate(String game, int port, String player) {
+
+        // Create connector
+        ConnectionState connectionState = new ConnectionState(null, port, player, true, game) {
+            @Override
+            protected void onLoggedOn(boolean loggedIn) {
+                super.onLoggedOn(loggedIn);
+
+                initLobby(true, getServerInfo(), getLobbyService(), getLobbyClientService(), true);
+            }
+        };
+        connectionState.addConnectionErrorListener(connectionErrorListener);
+        stateManager.attach(connectionState);
+
+        // Save player name & game name
+        try {
+            Main.getUserSettings().setSetting(Setting.PLAYER_NAME, player);
+            Main.getUserSettings().setSetting(Setting.GAME_NAME, game);
+            Main.getUserSettings().save();
+        } catch (IOException ex) {
+            logger.log(Level.ERROR, "Failed to save user settings!", ex);
+        }
+    }
+
+    public void multiplayerConnect(String hostAddress, String player) {
+        String[] address = hostAddress.split(":");
+        String host = address[0];
+        int port = (address.length == 2) ? Integer.parseInt(address[1]) : Main.getUserSettings().getInteger(Setting.MULTIPLAYER_LAST_PORT);
+
+        // Connect, connection is lazy
+        ConnectionState connectionState = new ConnectionState(host, port, player) {
+            @Override
+            protected void onLoggedOn(boolean loggedIn) {
+                super.onLoggedOn(loggedIn);
+
+                initLobby(true, getServerInfo(), getLobbyService(), getLobbyClientService(), true);
+            }
+        };
+        connectionState.addConnectionErrorListener(connectionErrorListener);
+        stateManager.attach(connectionState);
+
+        try {
+
+            // Save player name & last connection
+            Main.getUserSettings().setSetting(Setting.PLAYER_NAME, player);
+            Main.getUserSettings().setSetting(Setting.MULTIPLAYER_LAST_IP, hostAddress);
+            Main.getUserSettings().save();
+
+        } catch (IOException ex) {
+            logger.log(Level.ERROR, "Failed to save user settings!", ex);
+        }
+    }
+
+    private void initLobby(boolean online, String serverInfo, LobbyService lobbyService, LobbyClientService lobbyClientService, boolean doTransition) {
+
+        // Create and attach the lobby services
+        LobbyState lobbyState = new LobbyState(online, serverInfo, lobbyService, lobbyClientService, mapSelector);
+        stateManager.attach(lobbyState);
+
+        if (doTransition) {
+            app.enqueue(() -> {
+                screen.goToScreen("skirmishLobby");
+            });
+        }
+    }
+
+    public void shutdownMultiplayer() {
+        ConnectionState connectionState = stateManager.getState(ConnectionState.class);
+        if (connectionState != null) {
+            connectionState.addConnectionErrorListener(connectionErrorListener);
+            stateManager.detach(connectionState);
+        }
+        LobbyState lobbyState = stateManager.getState(LobbyState.class);
+        if (lobbyState != null) {
+            stateManager.detach(lobbyState);
+        }
+    }
+
+    public void chatTextSend(final String text) {
+        ChatClientService chatService = getChatService();
+        if (chatService != null) {
+            chatService.sendMessage(text);
+        } else {
+            logger.log(Level.WARNING, "Connection not initialized!");
+        }
+    }
+
+    public ChatClientService getChatService() {
+        ConnectionState connectionState = getConnectionState();
+        if (connectionState != null) {
+            return connectionState.getService(ChatClientService.class);
+        }
+        return null;
+    }
+
+    public boolean isHosting() {
+        LobbyState lobbyState = stateManager.getState(LobbyState.class);
+        if (lobbyState != null) {
+            return lobbyState.isHosting();
+        }
+        return false;
+    }
+
+    private ConnectionState getConnectionState() {
+        return stateManager.getState(ConnectionState.class);
+    }
+
+    public LobbyState getLobbyState() {
+        return stateManager.getState(LobbyState.class);
+    }
+
+    /**
+     * Called by the GUI, start the selected level
+     *
+     * @param type where level selected. @TODO change campaign like others or otherwise
+     */
+    public void startLevel(String type) {
+        if ("campaign".equalsIgnoreCase(type)) {
+            // Create the level state
+            IKwdFile kwdFile =selectedLevel.getKwdMap().load();
+            LocalGameSession.createLocalGame(kwdFile, true, stateManager, app, (CampaignLevel) selectedLevel);
+        } else {
+            logger.log(Level.WARNING, "Unknown type of Level {0}", type);
+            return;
+        }
+
+        // Start the game
+        setEnabled(false);
+    }
+
+    /**
+     * Plays a movie file
+     *
+     * @param movieFile the movie filename that should be played. No extension!
+     */
+    public void playMovie(String movieFile) {
+        try {
+            MovieState movieState = new MovieState(getDkIIFolder() + PathUtils.DKII_MOVIES_FOLDER + movieFile + ".TGQ") {
+                @Override
+                protected void onPlayingEnd() {
+                    inputManager.setCursorVisible(true);
+                }
+            };
+            stateManager.attach(movieState);
+            inputManager.setCursorVisible(false);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Failed to initiate playing " + movieFile + "!", e);
+        }
+    }
+
+    /**
+     * Does a cinematic transition and opens up a specified screen
+     *
+     * @param transition name of the transition (without file extension)
+     * @param screen the screen name
+     * @param transitionStatic set start static location of camera after transition
+     */
+    protected void doTransitionAndGoToScreen(final String transition, final String screen, final String transitionStatic) {
+
+        // Remove the current screen
+        this.screen.goToScreen(IMainMenuScreenController.SCREEN_EMPTY_ID);
+
+        // Do cinematic transition
+        Cinematic c = new Cinematic(assetManager, app.getCamera(), app.getListener(), startLocation, transition, menuNode, stateManager);
+        c.addListener(new CinematicEventListener() {
+            @Override
+            public void onPlay(CinematicEvent cinematic) {
+            }
+
+            @Override
+            public void onPause(CinematicEvent cinematic) {
+            }
+
+            @Override
+            public void onStop(CinematicEvent cinematic) {
+                if (transitionStatic != null) {
+                    loadCameraStartLocation(transitionStatic);
+                }
+                MainMenuState.this.screen.goToScreen(screen);
+            }
+        });
+        stateManager.attach(c);
+        c.play();
+    }
+
+    public void restart() {
+        app.restart();
+    }
+
+    public void quitToOS() {
+        app.stop();
+    }
+
+    /**
+     * Campaign level selected, transition the screen and display the briefing
+     *
+     * @param level the selected level
+     */
+    protected void selectCampaignLevel(GeneralLevel level) {
+        selectedLevel = level;
+        screen.doTransition("253", "briefing", null);
+    }
+
+    /**
+     * Refreshes arrow visibility and level playability on the 3D campaign map
+     * based on the current campaign progression stored in Settings.
+     */
+    protected void refreshCampaignMap() {
+        if (menuNode != null) {
+            menuNode.depthFirstTraversal(spatial -> {
+                if ("Map".equals(spatial.getName()) && spatial instanceof com.jme3.scene.Node mapNode) {
+                    HeroGateFrontEndConstructor.applyCampaignProgression(mapNode);
+                    HeroGateFrontEndConstructor.applyProgressTextures(mapNode, assetManager);
+                }
+            });
+        }
+    }
+
+    /**
+     * Shows the blinking arrows for the current playable level on the 3D
+     * campaign map. Called when entering the selectCampaignLevel screen.
+     */
+    protected void showArrows() {
+        if (menuNode != null) {
+            menuNode.depthFirstTraversal(spatial -> {
+                if ("Map".equals(spatial.getName()) && spatial instanceof com.jme3.scene.Node mapNode) {
+                    HeroGateFrontEndConstructor.setArrowsVisible(mapNode, true);
+                    HeroGateFrontEndConstructor.applyLevelTextures(mapNode, assetManager);
+                    HeroGateFrontEndConstructor.startHighlightBlink(mapNode, assetManager);
+                }
+            });
+        }
+    }
+
+    /**
+     * Hides all arrows on the 3D campaign map. Called when leaving the
+     * selectCampaignLevel screen.
+     */
+    protected void hideArrows() {
+        if (menuNode != null) {
+            menuNode.depthFirstTraversal(spatial -> {
+                if ("Map".equals(spatial.getName()) && spatial instanceof com.jme3.scene.Node mapNode) {
+                    HeroGateFrontEndConstructor.setArrowsVisible(mapNode, false);
+                    HeroGateFrontEndConstructor.stopHighlightBlink(mapNode, assetManager);
+                }
+            });
+        }
+    }
+
+    protected void setLevelBriefing(int levelBriefing) {
+        this.levelBriefing = levelBriefing;
+    }
+
+    /**
+     * Stops the level briefing sound
+     */
+    protected void clearLevelBriefingNarration() {
+
+        // Quit playing the sound
+        if (levelBriefing != SoundEngine.NO_HANDLE) {
+            SoundManager.stopSound(levelBriefing);
+        }
+        levelBriefing = SoundEngine.NO_HANDLE;
+    }
+
+    protected void setLevelDebriefing(int levelDebriefing) {
+        this.levelDebriefing = levelDebriefing;
+    }
+
+    /**
+     * Stops the level debriefing sound
+     */
+    protected void clearLevelDebriefingNarration() {
+
+        // Quit playing the sound
+        if (levelDebriefing != SoundEngine.NO_HANDLE) {
+            SoundManager.stopSound(levelDebriefing);
+        }
+        levelDebriefing = SoundEngine.NO_HANDLE;
+    }
+
+    /**
+     * Show the debriefing screen after a game has ended. The level that was played must be supplied for
+     * non-campaign games, while campaign games can fall back to the selected campaign level.
+     *
+     * @param result the game result
+     * @param level the level that was just played; may be {@code null} to fall back to
+     * {@link #selectedLevel}
+     * @param campaignLevel the played campaign level, {@code null} if it was not a campaign level
+     */
+    public void doDebriefing(GameResult result, IKwdFile level, CampaignLevel campaignLevel) {
+        debriefingLevel = level != null ? level : (selectedLevel != null ? selectedLevel.getKwdMap().load() : null);
+        debriefingCampaignLevel = campaignLevel != null ? campaignLevel
+                : (selectedLevel instanceof CampaignLevel lvl ? lvl : null);
+        pendingDebriefing = result != null;
+
+        // Only a won level gets the level-won cutscene and the winning debriefing
+        debriefingLevelWon = result != null && result.isLevelWon();
+        pendingCutsceneLevel = (pendingDebriefing && debriefingLevelWon && debriefingCampaignLevel != null
+                && debriefingCampaignLevel.getType() == CampaignLevel.LevelType.Level)
+                ? debriefingCampaignLevel : null;
+
+        setEnabled(true);
+
+        // The debriefing screen is shown (instead of the start screen) once the
+        // menu has been initialized, see initializeMainMenu()
+        if (!pendingDebriefing) {
+            screen.goToScreen(IMainMenuScreenController.SCREEN_START_ID);
+        }
+    }
+
+    /**
+     * Shows the level-won cutscene (mentor speech + movie), then continues on to the debriefing
+     * screen once it has finished playing.
+     *
+     * @param cutscene the cutscene to play
+     */
+    private void playLevelWonCutscene(MainMenuScreenController.Cutscene cutscene) {
+        screen.showCutscene(cutscene.moviename);
+        stateManager.attach(new CutsceneState(cutscene, () -> screen.showDebriefing()));
+    }
+
+    /**
+     * Get the level that was just played and for which the debriefing is shown
+     *
+     * @return the played level, or {@code null}
+     */
+    public IKwdFile getDebriefingLevel() {
+        return debriefingLevel;
+    }
+
+    /**
+     * See if the debriefing being shown is for a campaign level
+     *
+     * @return {@code true} if it is a campaign level debriefing
+     */
+    public boolean isDebriefingCampaign() {
+        return debriefingCampaignLevel != null;
+    }
+
+    /**
+     * Get the campaign level for which the debriefing is shown. It is the level that was played, not
+     * the one selected on the campaign map ({@link #selectedLevel}), which can be cleared by then.
+     *
+     * @return the played campaign level, or {@code null} if it was not a campaign level
+     */
+    public CampaignLevel getDebriefingCampaignLevel() {
+        return debriefingCampaignLevel;
+    }
+
+    /**
+     * See if the level of the debriefing being shown was won
+     *
+     * @return {@code true} if the level was won
+     */
+    public boolean isDebriefingLevelWon() {
+        return debriefingLevelWon;
+    }
+
+    /**
+     * Clear the level used for the debriefing screen, called when leaving the debriefing
+     */
+    void clearDebriefing() {
+        debriefingLevel = null;
+        debriefingCampaignLevel = null;
+        debriefingLevelWon = false;
+    }
+
+    /**
+     * See if the map thumbnail exist, otherwise create one TODO maybe move to IKwdFile class ???
+     *
+     * @param map
+     * @return path to map thumbnail file
+     */
+    protected String getMapThumbnail(IKwdMap map) {
+
+        // See if the map thumbnail exist, otherwise create one
+        String asset = AssetsConverter.MAP_THUMBNAILS_FOLDER + File.separator + PathUtils.stripFileName(map.getGameLevel().getName()) + ".png";
+        if (assetManager.locateAsset(new TextureKey(asset)) == null) {
+
+            // Generate
+            try {
+                AssetsConverter.generateMapThumbnail(map.load(), AssetsConverter.getAssetsFolder() + AssetsConverter.MAP_THUMBNAILS_FOLDER + File.separator);
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "Failed to generate map file out of {0}!", map);
+                asset = NO_THUMBNAIL;
+            }
+        }
+        return asset;
+    }
+
+    private final class MainMenuConnectionErrorListener implements ConnectionErrorListener {
+
+        @Override
+        public void showError(String title, String message, Throwable e, boolean fatal) {
+            app.enqueue(() -> {
+                screen.showError(title, message);
+            });
+        }
+
+    }
+
+    /**
+     * Main menu version of the player entity view state
+     */
+    private final class MainMenuEntityViewState extends PlayerEntityViewState {
+
+        public MainMenuEntityViewState(IKwdFile kwdFile, AssetManager assetManager, EntityData entityData, short playerId, TextParser textParser, Node rootNode) {
+            super(kwdFile, assetManager, entityData, playerId, textParser, rootNode);
+
+            setId("MainMenu: " + playerId);
+        }
+
+        /**
+         * The menu has no PlayerMapViewState, the light rules are the menu map's own
+         */
+        @Override
+        protected LightRules getLightRules() {
+            MapViewController controller = mapViewController;
+            return controller != null ? controller.getLightRules() : null;
+        }
+
+    }
+
+    private static final class MainMenuPlayerService implements PlayerService {
+
+        @Override
+        public void setWidescreen(boolean enable, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void playSpeech(int speechId, boolean showText, boolean introduction, int pathId, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public boolean isInTransition() {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void doTransition(short pathId, Vector3f start, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void flashButton(TriggerAction.MakeType buttonType, short targetId, TriggerAction.ButtonType targetButtonType, boolean enabled, int time, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void rotateViewAroundPoint(Vector3f point, boolean relative, int angle, int time, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void showMessage(int textId, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void zoomViewToPoint(Vector3f point, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void zoomViewToEntity(EntityId entityId, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void setGamePaused(boolean paused) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void showUnitFlower(EntityId entityId, int interval, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void setPossession(EntityId target, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void endGame(boolean win, short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+        @Override
+        public void sendEffect(int effectId, Vector3f position, float yaw) {
+            // The main menu has no running map effect generators.
+        }
+
+        @Override
+        public void sendEvent(GameEventType type, GameEvent.ThingFlag subjectKind, int subjectId, GameEvent.ThingFlag targetKind, int targetId, EntityId entity, Point position, Short playerId) {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+
+    }
+}

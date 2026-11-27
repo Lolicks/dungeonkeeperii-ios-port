@@ -1,0 +1,1086 @@
+/*
+ * Copyright (C) 2014-2016 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.controller.creature;
+
+import com.badlogic.gdx.ai.fsm.State;
+import com.badlogic.gdx.ai.msg.Telegram;
+import java.util.function.Consumer;
+import toniarts.openkeeper.game.controller.entity.IEntityController;
+import toniarts.openkeeper.game.task.Task;
+import toniarts.openkeeper.game.task.TaskType;
+import toniarts.openkeeper.tools.convert.map.Player;
+import toniarts.openkeeper.tools.convert.map.Thing;
+
+/**
+ * State machine for creature AI. TODO: needs to be hierarchial so that this
+ * class doesn't grow to be millions of lines
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public enum CreatureState implements State<ICreatureController> {
+
+    IDLE() {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            if (entity.isCombatPitFighter()) {
+                entity.getStateMachine().changeState(COMBAT_PIT);
+                return;
+            }
+
+            // Should we flee or attack
+            if (entity.shouldFleeOrAttack()) {
+                return;
+            }
+
+            // An enemy trap in sight, when there is no enemy creature to fight
+            if (entity.attackVisibleTrap()) {
+                return;
+            }
+
+            // An enemy door right next to us
+            if (entity.attackAdjacentDoor()) {
+                return;
+            }
+
+            // Idling is the last resort
+            entity.unassingCurrentTask();
+            findStuffToDo(entity, (foundWork) -> {
+                if (!foundWork) {
+                    wander(entity);
+                }
+            });
+        }
+
+        /**
+         * Walks an idle creature that found nothing to do to a random spot. A
+         * hero stays where it is: in DK II a hero whose objective can't start
+         * does nothing until it tries again (hero idle state 0x477850)
+         *
+         * @param entity the idle creature
+         */
+        private static void wander(ICreatureController entity) {
+            if (entity.getOwnerId() != Player.GOOD_PLAYER_ID) {
+                entity.navigateToRandomPoint();
+            }
+        }
+
+        private static void findStuffToDo(ICreatureController entity, Consumer<Boolean> workResult) {
+
+            // See if we should just follow
+            if (entity.getParty() != null && !entity.getParty().isPartyLeader(entity)) {
+                entity.setFollowTarget(entity.getParty().getPartyLeader().getEntityId());
+                entity.getStateMachine().changeState(CreatureState.FOLLOW);
+                workResult.accept(true);
+                return;
+            }
+
+            // A creature told to wait, or sent to an action point when there is none (it has passed its
+            // last waypoint), stays where it is. The original only shuffles about on the creature's own tile
+            Thing.HeroParty.Objective objective = entity.getObjective();
+            if (objective == Thing.HeroParty.Objective.WAIT || (objective == Thing.HeroParty.Objective.SEND_TO_ACTION_POINT
+                    && entity.getObjectiveTargetActionPointId() == 0)) {
+                workResult.accept(true);
+                return;
+            }
+
+            // See if we have an objective
+            if (entity.hasObjective() && entity.followObjective()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return;
+            }
+
+            // See lair need
+            if (entity.needsLair() && !entity.hasLair() && entity.findLair()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return; // Found work
+            }
+
+            // See basic needs
+            if (entity.hasLair() && entity.isNeedForSleep() && entity.goToSleep()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return; // Found work
+            }
+
+            // See hunger
+            if (entity.isHungry() && entity.goToEat()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return; // Found work
+            }
+
+            // See if we are owed pay
+            if (entity.goToCollectPay()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return; // Found work
+            }
+
+            // A full worker unloads its gold before it takes on new work
+            if (entity.isWorker() && entity.isTooMuchGold() && entity.dropGoldToTreasury()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return;
+            }
+
+            // Collect the jackpot won in the Casino
+            if (entity.collectWinnings()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                workResult.accept(true);
+                return;
+            }
+
+            // Dance in the keeper's Casino while it is in disco mode
+            if (entity.goToDisco()) {
+                entity.getStateMachine().changeState(CreatureState.DANCING);
+                workResult.accept(true);
+                return;
+            }
+
+            // Find work. A worker with nothing to do keeps the gold it carries, the original's imp wanders about with it.
+            // The Casino is only a fallback for a creature that could not start any of its jobs, as in the original
+            entity.findWork((foundWork) -> {
+                if (foundWork || entity.goGambling()) {
+                    entity.getStateMachine().changeState(CreatureState.WORK);
+                    workResult.accept(true); // Found work
+                } else {
+                    workResult.accept(false);
+                }
+            });
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (entity.isCombatPitFighter()) {
+                entity.getStateMachine().changeState(COMBAT_PIT);
+                return;
+            }
+
+            // Should we flee or attack
+            if (entity.shouldFleeOrAttack()) {
+                return;
+            }
+
+            // An enemy trap in sight, when there is no enemy creature to fight
+            if (entity.attackVisibleTrap()) {
+                return;
+            }
+
+            // An enemy door right next to us
+            if (entity.attackAdjacentDoor()) {
+                return;
+            }
+
+            // Native hunger is checked every tick, not only when re-evaluating
+            if (entity.isHungry() && entity.goToEat()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                return;
+            }
+
+            // So is the pay
+            if (entity.goToCollectPay()) {
+                entity.getStateMachine().changeState(CreatureState.WORK);
+                return;
+            }
+
+            if (entity.isTimeToReEvaluate()) {
+                entity.resetReEvaluationTimer();
+                findStuffToDo(entity, (foundWork) -> {
+                    if (!foundWork && entity.isStopped()) {
+                        wander(entity);
+                    }
+                });
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    },
+    WANDER() {
+
+        @Override
+        public void enter(ICreatureController entity) {
+//                    entity.wander();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+//                    if (entity.idleTimeExceeded()) {
+//                        entity.getStateMachine().changeState(IDLE);
+//                    }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    },
+    DEAD() {
+        @Override
+        public void enter(ICreatureController entity) {
+            //entity.die();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+//                    if (entity.idleTimeExceeded()) {
+//                        entity.getStateMachine().changeState(IDLE);
+//                    }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, SLAPPED {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, WORK {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.navigateToAssignedTask();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // Should we flee or attack
+            if (entity.shouldFleeOrAttack()) {
+                return;
+            }
+
+            // Hunger, then fatigue, then pay day interrupt a room job, including travel to it. DK II gives the three
+            // one mask of job groups (0x800A3C3B, set in 0x4798F0 and checked in 0x477C20): research, the Workshop,
+            // guard duty, the Temple, training and the Casino, but not the Prison, the Torture Chamber or a fight
+            Task task = entity.getAssignedTask();
+            boolean interruptible = task != null && switch (task.getTaskType()) {
+                case RESEARCH, MANUFACTURE, GUARD, PRAY, TRAIN, GAMBLE -> true;
+                default -> false;
+            };
+            if (interruptible && ((entity.isHungry() && entity.goToEat())
+                    || (entity.hasLair() && entity.isNeedForSleep() && entity.goToSleep())
+                    || entity.goToCollectPay())) {
+                // setAssignedTask released the previous job. Keep WORK so its exit cannot
+                // unassign the newly selected eat, sleep or pay task.
+                entity.navigateToAssignedTask();
+                return;
+            }
+
+            // A guard never finishes its duty, so a creature that took it up while no lair was
+            // to be had (a Dark Elf prefers it) looks for a home now and then
+            if (task != null && task.getTaskType() == TaskType.GUARD && entity.needsLair() && !entity.hasLair()
+                    && entity.isTimeToReEvaluate()) {
+                entity.resetReEvaluationTimer();
+                if (entity.findLair()) {
+                    entity.navigateToAssignedTask();
+                    return;
+                }
+            }
+
+            // Check validity
+            // A full worker unloads its gold, otherwise it looks for new work and keeps the gold it carries for now
+            if (!entity.isAssignedTaskValid() && !(entity.isTooMuchGold() && entity.dropGoldToTreasury())) {
+                entity.getStateMachine().changeState(IDLE);
+                return;
+            }
+
+            // Check arrival
+            if (entity.isAtAssignedTaskTarget()) {
+
+                // Do the task we were supposed to do
+                entity.executeAssignedTask();
+
+                // If we have too much gold, take it to the treasury. With nowhere to take it, we keep it
+                if (entity.isTooMuchGold()) {
+                    entity.dropGoldToTreasury();
+                }
+            } else if (entity.isStopped()) {
+                entity.navigateToAssignedTask();
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+            entity.unassingCurrentTask();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, FIGHT {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.unassingCurrentTask();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            IEntityController attackTarget = entity.getAttackTarget();
+            if (attackTarget == null) {
+                entity.getStateMachine().changeState(entity.isCombatPitFighter() ? COMBAT_PIT : IDLE); // Nothing to do
+                return;
+            }
+
+            // A badly hurt hero may withdraw to the hero lair, before fear is weighed (DK II 0x45F030)
+            if (entity.withdrawToHeroLair()) {
+                entity.getStateMachine().changeState(HERO_RECUPERATING);
+                return;
+            }
+
+            // A scared creature backs off from its target for a while (DK II 0x45F030)
+            if (entity.isScared()) {
+                entity.getStateMachine().changeState(BACK_OFF);
+                return;
+            }
+
+            // Our own creatures come first
+            if (entity.castSupportSpell()) {
+                return;
+            }
+
+            // If we have reached the target, stop and fight!
+            if (entity.isWithinAttackDistance(attackTarget.getEntityId())) {
+
+                // Attack!!
+                entity.stopCreature();
+                entity.executeAttack(attackTarget.getEntityId());
+            } else {
+                entity.navigateToAttackTarget(attackTarget.getEntityId());
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, FOLLOW {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            //entity.followTarget(entity.getFollowTarget());
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // See if we should follow
+            if (entity.getFollowTarget() == null || entity.getFollowTarget().isIncapacitated()) {
+                entity.getStateMachine().changeState(IDLE);
+                return;
+            }
+
+            // Should we flee or attack
+            if (entity.shouldFleeOrAttack()) {
+                return;
+            }
+
+            // If leader has set a task, perform it
+            if (entity.getAssignedTask() != null) {
+                entity.getStateMachine().changeState(WORK);
+                return;
+            }
+
+            // Don't let the target wander too far off
+            if (entity.shouldNavigateToFollowTarget()) {
+                entity.navigateToRandomPointAroundTarget(entity.getFollowTarget().getEntityId(), 1);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+            entity.resetFollowTarget();
+            entity.stopCreature();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    },
+    ENTERING_DUNGEON {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (entity.isStateTimeExceeded()) {
+                entity.completeDungeonEntrance();
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    },
+    PICKED_UP {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, FLEE {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.unassingCurrentTask();
+            entity.flee();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (entity.isStateTimeExceeded() && !entity.shouldFleeOrAttack()) {
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, BACK_OFF {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.startBackOff();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // We withdraw when our time is up or we can't back away, and fight again once we aren't scared (DK II 0x4602E0)
+            if (entity.isBackOffOver()) {
+                entity.getStateMachine().changeState(FLEE);
+            } else if (!entity.isScared() || entity.getAttackTarget() == null) {
+                entity.getStateMachine().changeState(FIGHT);
+            } else if (!entity.backOff()) {
+                entity.getStateMachine().changeState(FLEE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, UNCONSCIOUS {
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.stopCreature();
+            entity.unassingCurrentTask();
+
+            // A knocked out creature drops its gold at once, even if it is rescued later (0x4596D0)
+            entity.dropLoot();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, STUNNED {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, IMPRISONED {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, TORTURED {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, SLEEPING {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (!entity.hasLair() || entity.isAttacked() || entity.isEnoughSleep()) {
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+            entity.stopRecuperating();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, RECUPERATING {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (!entity.hasLair() || entity.isEnoughSleep()) {
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+            public void exit(ICreatureController entity) {
+                entity.stopRecuperating();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, DRAGGED {
+
+    @Override
+    public void enter(ICreatureController entity) {
+
+    }
+
+    @Override
+    public void update(ICreatureController entity) {
+
+    }
+
+    @Override
+    public void exit(ICreatureController entity) {
+
+    }
+
+    @Override
+    public boolean onMessage(ICreatureController entity, Telegram telegram) {
+        return true;
+        }
+    }, FALLEN {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (entity.isStateTimeExceeded()) {
+                entity.getStateMachine().changeState(GETTING_UP);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, GETTING_UP {
+
+        @Override
+            public void enter(ICreatureController entity) {
+
+            }
+
+            @Override
+            public void update(ICreatureController entity) {
+                if (entity.isStateTimeExceeded()) {
+                    entity.getStateMachine().changeState(IDLE);
+                }
+            }
+
+            @Override
+            public void exit(ICreatureController entity) {
+
+            }
+
+            @Override
+            public boolean onMessage(ICreatureController entity, Telegram telegram) {
+        return true;
+        }
+    }, MELEE_ATTACK {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // The swing lasts until both the animation is over and the hit has landed
+            entity.releaseMeleeHit();
+            if (entity.isStateTimeExceeded() && !entity.hasPendingMeleeHit()) {
+                entity.getStateMachine().changeState(FIGHT);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+            entity.cancelMeleeHit();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, CAST_SPELL {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // The fear is checked during the cast too, and a scared caster backs off at once, cutting its cast short
+            // (DK II 0x45F030, 0x471890)
+            if (entity.isScared()) {
+                entity.getStateMachine().changeState(BACK_OFF);
+                return;
+            }
+            entity.releaseCastShot();
+            if (entity.isStateTimeExceeded()) {
+                entity.getStateMachine().changeState(FIGHT);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+            entity.cancelCastShot();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+
+    }, EATING {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+            public void update(ICreatureController entity) {
+            if (entity.isStateTimeExceeded()) {
+                entity.sate();
+
+                // Should we flee or attack
+                if (entity.shouldFleeOrAttack()) {
+                    return;
+                }
+
+                // See if we are still hungry
+                if (entity.isHungry() && entity.goToEat()) {
+                    entity.getStateMachine().changeState(CreatureState.WORK);
+                    return;
+                }
+                entity.getStateMachine().changeState(CreatureState.IDLE);
+            }
+
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, COMBAT_PIT {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.unassingCurrentTask();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // Wait in the pit for someone to fight, now and then walking to another spot in it
+            if (!entity.isCombatPitFighter()) {
+                entity.getStateMachine().changeState(IDLE);
+            } else if (entity.getAttackTarget() != null) {
+                entity.getStateMachine().changeState(FIGHT);
+            } else if (entity.isTimeToReEvaluate()) {
+                entity.resetReEvaluationTimer();
+                entity.navigateToRandomPointInCombatPit();
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, DANCING {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // Should we flee or attack
+            if (entity.shouldFleeOrAttack()) {
+                return;
+            }
+
+            // Dance until the disco is over
+            if (entity.isStopped() && !entity.isAtDisco()) {
+                entity.getStateMachine().changeState(CreatureState.IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, CELEBRATING {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // Then go to collect the jackpot
+            if (entity.isStateTimeExceeded()) {
+                entity.getStateMachine().changeState(entity.collectWinnings() ? CreatureState.WORK : CreatureState.IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, CHICKEN {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.unassingCurrentTask();
+            entity.navigateToRandomPoint();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // Back to our old self
+            if (entity.isStateTimeExceeded()) {
+                entity.getStateMachine().changeState(IDLE);
+                return;
+            }
+
+            // Just peck about
+            if (entity.isStopped()) {
+                entity.navigateToRandomPoint();
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, GO_TO_SLEEP {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.unassingCurrentTask();
+            if (entity.goToSleepAfterLairDrop()) {
+                entity.getStateMachine().changeState(WORK);
+            } else if (entity.getStateMachine().getCurrentState() == GO_TO_SLEEP) {
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, CALL_TO_ARMS {
+
+        @Override
+        public void enter(ICreatureController entity) {
+            entity.unassingCurrentTask();
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+            if (!entity.heedCallToArms()) {
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+            entity.resetFollowTarget();
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, HERO_RECUPERATING {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // A wounded hero walks to the hero lair, then about its own land until its health is back,
+            // and fights what it meets on the way (DK II state 0x10A, 0x461B50)
+            if (entity.shouldFleeOrAttack()) {
+                return;
+            }
+            if (entity.isStopped()) {
+                if (entity.isFullHealth()) {
+                    entity.getStateMachine().changeState(IDLE);
+                } else {
+                    entity.wanderOnOwnLand();
+                }
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }, TELLING_OFF {
+
+        @Override
+        public void enter(ICreatureController entity) {
+
+        }
+
+        @Override
+        public void update(ICreatureController entity) {
+
+            // Disturbed at its work in the Library or the Training Room, it swings at the creature in its way, then
+            // goes back to work (DK II states 59 and 109, 0x478F00)
+            if (entity.isStateTimeExceeded()) {
+                entity.getStateMachine().changeState(IDLE);
+            }
+        }
+
+        @Override
+        public void exit(ICreatureController entity) {
+
+        }
+
+        @Override
+        public boolean onMessage(ICreatureController entity, Telegram telegram) {
+            return true;
+        }
+    }
+}

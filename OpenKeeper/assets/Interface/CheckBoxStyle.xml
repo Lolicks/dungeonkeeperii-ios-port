@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nifty-styles xmlns="http://nifty-gui.lessvoid.com/nifty-gui">
+
+    <style id="nifty-checkbox-style#panel">
+        <attributes width="32px" height="32px" childLayout="center" backgroundImage="Textures/Tick_Toggle-0.png"/>
+        <effect>
+            <onHover name="changeImage" imageMode="backgroundImage" active="Textures/Tick_Toggle-0-Over.png" inactive="Textures/Tick_Toggle-0.png"/>
+            <onClick name="changeImage" imageMode="backgroundImage" active="Textures/Tick_Toggle-0-Click.png" inactive="Textures/Tick_Toggle-0.png"/>
+        </effect>
+    </style>
+
+    <style id="nifty-checkbox-style#select">
+        <attributes align="center" valign="center" width="32px" height="32px" backgroundImage="Textures/Tick_Toggle-1.png" />
+        <effect overlay="true">
+            <onEnabled name="fade" start="#4" end="#f" length="150" />
+            <onDisabled name="fade" start="#f" end="#4" length="150" />
+        </effect>
+    </style>
+</nifty-styles>

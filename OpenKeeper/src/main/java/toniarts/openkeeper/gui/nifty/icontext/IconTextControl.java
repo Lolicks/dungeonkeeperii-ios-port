@@ -1,0 +1,106 @@
+/*
+ * Copyright (C) 2014-2015 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.gui.nifty.icontext;
+
+import de.lessvoid.nifty.Nifty;
+import de.lessvoid.nifty.NiftyIdCreator;
+import de.lessvoid.nifty.controls.Controller;
+import de.lessvoid.nifty.controls.Parameters;
+import de.lessvoid.nifty.effects.EffectEventId;
+import de.lessvoid.nifty.elements.Element;
+import de.lessvoid.nifty.input.NiftyInputEvent;
+import de.lessvoid.nifty.screen.Screen;
+import toniarts.openkeeper.gui.nifty.NiftyUtils;
+
+/**
+ * A small class combining an image and a text, with on hover effect
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class IconTextControl implements Controller {
+
+    /**
+     * Optional, the sound that is played when the control is clicked
+     */
+    static final String PARAMETER_SOUND_CATEGORY = "soundCategory";
+    static final String PARAMETER_SOUND_EVENT = "soundEvent";
+
+    private Nifty nifty;
+    private Screen screen;
+    private Parameters parameters;
+    private Element element;
+    private Element image;
+    private Element text;
+
+    @Override
+    public void bind(Nifty nifty, Screen screen, Element elmnt, Parameters prmtrs) {
+        this.nifty = nifty;
+        this.screen = screen;
+        this.parameters = prmtrs;
+        this.element = elmnt;
+
+        if (this.element.getId() == null) {
+            this.element.setId("IconText-" + NiftyIdCreator.generate());
+        }
+
+        // Get the elements
+        image = this.element.findElementById("#image");
+        text = this.element.findElementById("#text");
+    }
+
+    @Override
+    public void onStartScreen() {
+    }
+
+    @Override
+    public void onFocus(boolean getFocus) {
+    }
+
+    @Override
+    public boolean inputEvent(NiftyInputEvent inputEvent) {
+        return false;
+    }
+
+    public void startHover() {
+        image.startEffect(EffectEventId.onCustom, null, "hover");
+        text.startEffect(EffectEventId.onCustom, null, "hover");
+    }
+
+    public void click() {
+        String category = parameters.get(PARAMETER_SOUND_CATEGORY);
+        String event = parameters.get(PARAMETER_SOUND_EVENT);
+        if (category == null || category.isEmpty() || event == null || event.isEmpty()) {
+            return;
+        }
+        NiftyUtils.playSound(nifty, category, Integer.parseInt(event));
+    }
+
+    public void endHover() {
+        image.stopEffect(EffectEventId.onCustom);
+        text.stopEffect(EffectEventId.onCustom);
+    }
+
+    @Override
+    public void init(Parameters prmtrs) {
+
+    }
+
+    @Override
+    public void onEndScreen() {
+
+    }
+}

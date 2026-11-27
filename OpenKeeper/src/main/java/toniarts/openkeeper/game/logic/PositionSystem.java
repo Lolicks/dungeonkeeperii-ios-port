@@ -1,0 +1,492 @@
+/*
+ * Copyright (C) 2014-2018 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.logic;
+
+import com.jme3.math.Vector3f;
+import com.simsilica.es.Entity;
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import com.simsilica.es.EntitySet;
+import toniarts.openkeeper.utils.Point;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import toniarts.openkeeper.game.component.DoorComponent;
+import toniarts.openkeeper.game.component.Navigation;
+import toniarts.openkeeper.game.component.Owner;
+import toniarts.openkeeper.game.component.Position;
+import toniarts.openkeeper.game.component.Senses;
+import toniarts.openkeeper.game.controller.ICreaturesController;
+import toniarts.openkeeper.game.controller.IDoorsController;
+import toniarts.openkeeper.game.controller.IEntityWrapper;
+import toniarts.openkeeper.game.controller.IMapController;
+import toniarts.openkeeper.game.controller.IObjectsController;
+import toniarts.openkeeper.game.controller.creature.ICreatureController;
+import toniarts.openkeeper.game.controller.door.IDoorController;
+import toniarts.openkeeper.game.controller.entity.EntityController;
+import toniarts.openkeeper.game.controller.entity.IEntityController;
+import toniarts.openkeeper.game.controller.object.IObjectController;
+import toniarts.openkeeper.game.map.IMapTileInformation;
+import toniarts.openkeeper.tools.convert.map.Terrain;
+import toniarts.openkeeper.utils.WorldUtils;
+
+/**
+ * Maintains a tile based position map of all the entities for a quick lookup
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class PositionSystem implements IGameLogicUpdatable, IEntityPositionLookup {
+
+    private final EntityData entityData;
+    private final IMapController mapController;
+    private final IObjectsController objectsController;
+    private final EntitySet positionedEntities;
+    private final Set<EntityId>[][] entitiesByMapTile;
+    private final Set<EntityId>[][] obstaclesByMapTile;
+    private final Map<EntityId, IMapTileInformation> mapTilesByEntities = new HashMap<>();
+    private final Map<Class, IEntityWrapper<?>> entityWrappers = new HashMap<>();
+
+    private final Map<EntityId, Set<EntityId>> sensedEntitiesByEntity = new HashMap<>();
+
+    public PositionSystem(IMapController mapController, EntityData entityData, ICreaturesController creaturesController, IDoorsController doorsController, IObjectsController objectsController) {
+        this.entityData = entityData;
+        this.mapController = mapController;
+        this.objectsController = objectsController;
+        entityWrappers.put(ICreatureController.class, creaturesController);
+        entityWrappers.put(IDoorController.class, doorsController);
+        entityWrappers.put(IObjectController.class, objectsController);
+
+        // Initialize data structures in a single pass
+        int width = mapController.getMapData().getWidth();
+        int height = mapController.getMapData().getHeight();
+        Set<EntityId>[][] entities = new Set[width][height];
+        Set<EntityId>[][] obstacles = new Set[width][height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                entities[x][y] = new HashSet<>();
+                obstacles[x][y] = new HashSet<>();
+            }
+        }
+        entitiesByMapTile = entities;
+        obstaclesByMapTile = obstacles;
+
+        positionedEntities = entityData.getEntities(Position.class);
+        processAddedEntities(positionedEntities);
+    }
+
+    @Override
+    public void processTick(float tpf) {
+        // This is just a cache for a tick
+        sensedEntitiesByEntity.clear();
+
+        if (positionedEntities.applyChanges()) {
+            processAddedEntities(positionedEntities.getAddedEntities());
+            processDeletedEntities(positionedEntities.getRemovedEntities());
+            processChangedEntities(positionedEntities.getChangedEntities());
+        }
+    }
+
+    private void processChangedEntities(Set<Entity> entities) {
+        // Update
+        for (Entity entity : entities) {
+            Point p = WorldUtils.vectorToPoint(entity.get(Position.class).position);
+            IMapTileInformation currentMapTile = mapController.getMapData().getTile(p);
+
+            IMapTileInformation previousMapTile = mapTilesByEntities.get(entity.getId());
+            if (currentMapTile.equals(previousMapTile)) {
+                continue;
+            }
+
+            // A door is not walked through, whatever path the entity was following
+            if (isWalkingIntoBlockingDoor(entity, currentMapTile)) {
+                pushBack(entity, previousMapTile);
+                continue;
+            }
+
+            int x = previousMapTile.getX();
+            int y = previousMapTile.getY();
+
+            // Moved
+            mapTilesByEntities.put(entity.getId(), currentMapTile);
+            entitiesByMapTile[x][y].remove(entity.getId());
+
+            // Obstacles
+            obstaclesByMapTile[x][y].remove(entity.getId());
+
+            addEntityToTile(currentMapTile, entity);
+        }
+    }
+
+    private boolean isWalkingIntoBlockingDoor(Entity entity, IMapTileInformation mapTile) {
+        if (entityData.getComponent(entity.getId(), Navigation.class) == null) {
+            return false;
+        }
+
+        Owner owner = entityData.getComponent(entity.getId(), Owner.class);
+        return owner != null && getBlockingDoor(mapTile.getX(), mapTile.getY(), owner.ownerId) != null;
+    }
+
+    /**
+     * Stops the entity and puts it back to the middle of the tile it came from
+     */
+    private void pushBack(Entity entity, IMapTileInformation mapTile) {
+        Position position = entity.get(Position.class);
+        Vector3f center = WorldUtils.pointToVector3f(mapTile.getX(), mapTile.getY());
+        center.y = position.position.y;
+        entityData.removeComponent(entity.getId(), Navigation.class);
+        entityData.setComponent(entity.getId(), new Position(position.rotation, center));
+    }
+
+    private void addEntityToTile(IMapTileInformation mapTile, Entity entity) {
+        int x = mapTile.getX();
+        int y = mapTile.getY();
+
+        entitiesByMapTile[x][y].add(entity.getId());
+
+        // Obstacles
+        if (isObstacle(entityData, entity.getId())) {
+            obstaclesByMapTile[x][y].add(entity.getId());
+        }
+    }
+
+    private void processDeletedEntities(Set<Entity> entities) {
+
+        // Remove
+        for (Entity entity : entities) {
+            IMapTileInformation mapTile = mapTilesByEntities.remove(entity.getId());
+
+            int x = mapTile.getX();
+            int y = mapTile.getY();
+            entitiesByMapTile[x][y].remove(entity.getId());
+            obstaclesByMapTile[x][y].remove(entity.getId());
+        }
+    }
+
+    private void processAddedEntities(Set<Entity> entities) {
+
+        // Add
+        for (Entity entity : entities) {
+            Point p = WorldUtils.vectorToPoint(entity.get(Position.class).position);
+            IMapTileInformation mapTile = mapController.getMapData().getTile(p);
+            mapTilesByEntities.put(entity.getId(), mapTile);
+
+            addEntityToTile(mapTile, entity);
+        }
+    }
+
+    @Override
+    public List<EntityId> getEntitiesInLocation(Point p) {
+        return getEntitiesInLocation(p.x, p.y);
+    }
+
+    @Override
+    public List<EntityId> getEntitiesInLocation(IMapTileInformation mapTile) {
+        return getEntitiesInLocation(mapTile.getX(), mapTile.getY());
+    }
+
+    @Override
+    public List<EntityId> getEntitiesInLocation(int x, int y) {
+        if (x < 0 || y < 0 || x >= entitiesByMapTile.length || y >= entitiesByMapTile[x].length) {
+            return Collections.emptyList();
+        }
+        Set<EntityId> entityIds = entitiesByMapTile[x][y];
+        if (entityIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return new ArrayList<>(entityIds);
+    }
+
+    @Override
+    public IMapTileInformation getEntityLocation(EntityId entityId) {
+        return mapTilesByEntities.get(entityId);
+    }
+
+    @Override
+    public <T extends IEntityController> List<T> getEntityTypesInLocation(Point p, Class<T> clazz) {
+        return getEntityTypesInLocation(p.x, p.y, clazz);
+    }
+
+    @Override
+    public <T extends IEntityController> List<T> getEntityTypesInLocation(IMapTileInformation mapTile, Class<T> clazz) {
+        return getEntityTypesInLocation(mapTile.getX(), mapTile.getY(), clazz);
+    }
+
+    @Override
+    public <T extends IEntityController> List<T> getEntityTypesInLocation(int x, int y, Class<T> clazz) {
+        Set<EntityId> entityIds = entitiesByMapTile[x][y];
+        if (entityIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        IEntityWrapper<T> entityWrapper = getEntityWrapper(clazz);
+
+        List<T> entities = new ArrayList<>(entityIds.size());
+        for (EntityId entityId : new ArrayList<>(entityIds)) {
+            if (!entityWrapper.isValidEntity(entityId)) {
+                continue;
+            }
+
+            entities.add(entityWrapper.createController(entityId));
+        }
+
+        return entities;
+    }
+
+    @Override
+    public IEntityController getEntityController(EntityId entityId) {
+
+        // Hmm, dunno, it might get duplicate hits etc. Not maybe smart design.
+        // Maybe create the base interface methods as final, and it would be always valid to return the IEntityController wherever required
+        for (IEntityWrapper<?> entityWrapper : entityWrappers.values()) {
+            if (entityWrapper.isValidEntity(entityId)) {
+                return entityWrapper.createController(entityId);
+            }
+        }
+
+        // Hmm, I think this is safe, just create the general one
+        return new EntityController(entityId, entityData, objectsController, mapController);
+    }
+
+    @Override
+    public <T extends IEntityController> T getEntityController(EntityId entityId, Class<T> clazz) {
+        IEntityWrapper<T> entityWrapper = getEntityWrapper(clazz);
+
+        return entityWrapper.createController(entityId);
+    }
+
+    private <T extends IEntityController> IEntityWrapper<T> getEntityWrapper(Class<T> clazz) throws RuntimeException {
+        IEntityWrapper<T> entityWrapper = (IEntityWrapper<T>) entityWrappers.get(clazz);
+        if (entityWrapper == null) {
+            throw new RuntimeException("No entity wrappers registered with type " + clazz + "!");
+        }
+        return entityWrapper;
+    }
+
+    @Override
+    public void start() {
+
+    }
+
+    @Override
+    public void stop() {
+        positionedEntities.release();
+        mapTilesByEntities.clear();
+        entityWrappers.clear();
+        clearMatrix(entitiesByMapTile);
+        clearMatrix(obstaclesByMapTile);
+    }
+
+    private static void clearMatrix(Set<EntityId>[][] matrix) {
+        for (int x = 0; x < matrix.length; x++) {
+            for (int y = 0; y < matrix[x].length; y++) {
+                matrix[x][y] = null;
+            }
+        }
+    }
+
+    private static boolean isObstacle(EntityData entityData, EntityId id) {
+
+        // Objects have solid obstacle property, but that in my opinion doesn't block the whole tile
+        // More of a physics thingie that...
+        // So only doors here now... Also the door blueprints, the door is built where it stands, and
+        // whether it blocks is checked when asked
+        return entityData.getComponent(id, DoorComponent.class) != null;
+    }
+
+    @Override
+    public boolean isTileBlocked(Point p, short playerId) {
+        return isTileBlocked(p.x, p.y, playerId);
+    }
+
+    @Override
+    public boolean isTileBlocked(IMapTileInformation mapTile, short playerId) {
+        return isTileBlocked(mapTile.getX(), mapTile.getY(), playerId);
+    }
+
+    @Override
+    public boolean isTileBlocked(int x, int y, short playerId) {
+        return getBlockingDoor(x, y, playerId) != null;
+    }
+
+    @Override
+    public EntityId getBlockingDoor(int x, int y, short playerId) {
+        Set<EntityId> entityIds = obstaclesByMapTile[x][y];
+        if (entityIds.isEmpty()) {
+            return null;
+        }
+
+        for (EntityId entityId : entityIds) {
+            DoorComponent doorComponent = entityData.getComponent(entityId, DoorComponent.class);
+            if (doorComponent == null || doorComponent.blueprint) {
+                continue;
+            }
+
+            if (doorComponent.locked) {
+                return entityId;
+            }
+
+            Owner owner = entityData.getComponent(entityId, Owner.class);
+
+            return owner == null || owner.ownerId != playerId ? entityId : null;
+        }
+
+        return null;
+    }
+
+    @Override
+    public Set<EntityId> getSensedEntities(EntityId entityId) {
+        Senses senses = entityData.getComponent(entityId, Senses.class);
+        if (senses == null) {
+            return Collections.emptySet();
+        }
+
+        return sensedEntitiesByEntity.computeIfAbsent(entityId, (id) -> {
+            Set<EntityId> sensedEntities = new HashSet<>();
+
+            // Get creatures we sense
+            IMapTileInformation tile = getEntityLocation(id);
+            // TODO: Every creature has hearing & vision 4, so I can just cheat this in, but should fix eventually
+            // https://github.com/tonihele/OpenKeeper/issues/261
+            if (tile != null) {
+                addSensedEntities(tile, (int) Math.max(senses.distanceCanHear, senses.distanceCanSee),
+                        entityData.getComponent(id, Owner.class).ownerId, true, sensedEntities);
+            }
+
+            // Remove us, the caller
+            sensedEntities.remove(id);
+
+            return sensedEntities;
+        });
+    }
+
+    @Override
+    public boolean isBehindBlockingDoor(EntityId entityId, EntityId sensedEntityId) {
+        Senses senses = entityData.getComponent(entityId, Senses.class);
+        Owner owner = entityData.getComponent(entityId, Owner.class);
+        IMapTileInformation tile = getEntityLocation(entityId);
+        if (senses == null || owner == null || tile == null) {
+            return false;
+        }
+
+        // Sense again, but stop at all the doors that block us, barricades too
+        Set<EntityId> sensedEntities = new HashSet<>();
+        addSensedEntities(tile, (int) Math.max(senses.distanceCanHear, senses.distanceCanSee), owner.ownerId, false, sensedEntities);
+
+        return !sensedEntities.contains(sensedEntityId);
+    }
+
+    private boolean isBarricade(IMapTileInformation tile) {
+        for (EntityId entityId : obstaclesByMapTile[tile.getX()][tile.getY()]) {
+            if (entityData.getComponent(entityId, DoorComponent.class) != null) {
+                return getEntityController(entityId, IDoorController.class).isBarricade();
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Adds the entities around the tile to the sensed ones
+     *
+     * @param startTile the tile to sense from
+     * @param range how many tiles further to sense
+     * @param playerId the player whose blocking doors stop the senses
+     * @param overBarricades whether the senses go over a barricade that blocks
+     * the player
+     * @param sensedEntities the sensed entities
+     */
+    private void addSensedEntities(IMapTileInformation startTile, int range, short playerId, boolean overBarricades,
+            Set<EntityId> sensedEntities) {
+
+        // Go out one step at a time, so each tile is looked at only once
+        Set<IMapTileInformation> visitedTiles = new HashSet<>();
+        List<IMapTileInformation> tiles = List.of(startTile);
+        for (int distance = 0; distance <= range && !tiles.isEmpty(); distance++) {
+            List<IMapTileInformation> nextTiles = new ArrayList<>();
+            for (IMapTileInformation tile : tiles) {
+                if (!visitedTiles.add(tile) || blocksSenses(tile)) {
+                    continue;
+                }
+
+                sensedEntities.addAll(entitiesByMapTile[tile.getX()][tile.getY()]);
+
+                // A door blocks the sight, as in DK II (0x4511A0), but creatures see over a barricade. The hearing
+                // follows the paths (0x45AFF0), so it only goes through a door the creature can walk through
+                if (isTileBlocked(tile, playerId) && !(overBarricades && isBarricade(tile))) {
+                    continue;
+                }
+
+                nextTiles.add(mapController.getMapData().getTile(tile.getX() + 1, tile.getY()));
+                nextTiles.add(mapController.getMapData().getTile(tile.getX() - 1, tile.getY()));
+                nextTiles.add(mapController.getMapData().getTile(tile.getX(), tile.getY() + 1));
+                nextTiles.add(mapController.getMapData().getTile(tile.getX(), tile.getY() - 1));
+            }
+            tiles = nextTiles;
+        }
+    }
+
+    private boolean blocksSenses(IMapTileInformation tile) {
+        return tile == null || mapController.getTerrain(tile).getFlags().contains(Terrain.TerrainFlag.SOLID);
+    }
+
+    /**
+     * Like DK II, goes along the line from tile to tile and checks every tile
+     * it enters. Where the line passes exactly through a corner, both tiles
+     * beside the corner block it too (DKII.EXE 0x4512F0).
+     */
+    @Override
+    public boolean hasLineOfSight(Vector3f from, Vector3f to) {
+        Point startTile = WorldUtils.vectorToPoint(from);
+        int x = startTile.x;
+        int y = startTile.y;
+        float dx = to.x - from.x;
+        float dz = to.z - from.z;
+        int stepX = dx > 0 ? 1 : -1;
+        int stepY = dz > 0 ? 1 : -1;
+
+        // How far along the line the next tile edge on each axis is, 1 being the whole line
+        float edgeX = dx == 0 ? Float.MAX_VALUE : ((x + stepX * 0.5f) * WorldUtils.TILE_WIDTH - from.x) / dx;
+        float edgeY = dz == 0 ? Float.MAX_VALUE : ((y + stepY * 0.5f) * WorldUtils.TILE_WIDTH - from.z) / dz;
+        var mapData = mapController.getMapData();
+        while (edgeX < 1 || edgeY < 1) {
+            boolean crossesX = edgeX <= edgeY;
+            boolean crossesY = edgeY <= edgeX;
+            if (crossesX && crossesY
+                    && (blocksSenses(mapData.getTile(x + stepX, y)) || blocksSenses(mapData.getTile(x, y + stepY)))) {
+                return false;
+            }
+            if (crossesX) {
+                x += stepX;
+                edgeX += WorldUtils.TILE_WIDTH / Math.abs(dx);
+            }
+            if (crossesY) {
+                y += stepY;
+                edgeY += WorldUtils.TILE_WIDTH / Math.abs(dz);
+            }
+            if (blocksSenses(mapData.getTile(x, y))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+}

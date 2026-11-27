@@ -1,0 +1,1450 @@
+/*
+ * Copyright (C) 2014-2016 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.state;
+
+import com.jme3.input.KeyNames;
+import com.jme3.system.AppSettings;
+import de.lessvoid.nifty.Nifty;
+import de.lessvoid.nifty.NiftyEventSubscriber;
+import de.lessvoid.nifty.builder.ControlBuilder;
+import de.lessvoid.nifty.builder.ElementBuilder.Align;
+import de.lessvoid.nifty.builder.TextBuilder;
+import de.lessvoid.nifty.controls.CheckBox;
+import de.lessvoid.nifty.controls.CheckBoxStateChangedEvent;
+import de.lessvoid.nifty.controls.DropDown;
+import de.lessvoid.nifty.controls.DropDownSelectionChangedEvent;
+import de.lessvoid.nifty.controls.Label;
+import de.lessvoid.nifty.controls.ListBox;
+import de.lessvoid.nifty.controls.ListBoxSelectionChangedEvent;
+import de.lessvoid.nifty.controls.Slider;
+import de.lessvoid.nifty.controls.TextField;
+import de.lessvoid.nifty.effects.EffectEventId;
+import de.lessvoid.nifty.elements.Element;
+import de.lessvoid.nifty.elements.render.ImageRenderer;
+import de.lessvoid.nifty.elements.render.TextRenderer;
+import de.lessvoid.nifty.render.NiftyImage;
+import de.lessvoid.nifty.screen.Screen;
+import de.lessvoid.nifty.tools.Color;
+import de.lessvoid.nifty.tools.SizeValue;
+import toniarts.openkeeper.Main;
+import toniarts.openkeeper.game.data.CustomMPDLevel;
+import toniarts.openkeeper.game.data.GameResult;
+import toniarts.openkeeper.game.data.HiScores;
+import toniarts.openkeeper.game.data.CampaignLevel;
+import toniarts.openkeeper.game.data.CampaignLevel.LevelType;
+import toniarts.openkeeper.game.data.Settings;
+import toniarts.openkeeper.game.data.Settings.LevelStatus;
+import toniarts.openkeeper.game.network.chat.ChatClientService;
+import toniarts.openkeeper.game.network.chat.ChatSessionListener;
+import toniarts.openkeeper.game.sound.GlobalCategory;
+import toniarts.openkeeper.game.sound.GlobalType;
+import toniarts.openkeeper.game.sound.MentorType;
+import toniarts.openkeeper.game.sound.SoundCategory;
+import toniarts.openkeeper.game.sound.SoundManager;
+import toniarts.openkeeper.game.sound.AudioOutput;
+import toniarts.openkeeper.game.sound.AudioOutputMode;
+import toniarts.openkeeper.game.state.lobby.ClientInfo;
+import toniarts.openkeeper.game.state.lobby.LobbySession;
+import toniarts.openkeeper.game.state.lobby.LobbySessionListener;
+import toniarts.openkeeper.game.state.lobby.LobbyState;
+import toniarts.openkeeper.gui.nifty.NiftyUtils;
+import toniarts.openkeeper.gui.nifty.chat.Chat;
+import toniarts.openkeeper.gui.nifty.chat.event.ChatTextSendEvent;
+import toniarts.openkeeper.gui.nifty.table.TableColumn;
+import toniarts.openkeeper.gui.nifty.table.TableControl;
+import toniarts.openkeeper.gui.nifty.table.TableRow;
+import toniarts.openkeeper.gui.nifty.table.player.PlayerTableBuilder;
+import toniarts.openkeeper.gui.nifty.table.player.PlayerTableRow;
+import toniarts.openkeeper.tools.convert.AssetsConverter;
+import toniarts.openkeeper.tools.convert.map.AI;
+import toniarts.openkeeper.tools.convert.map.GameLevel;
+import toniarts.openkeeper.tools.convert.map.IKwdFile;
+import toniarts.openkeeper.tools.convert.map.IKwdMap;
+import toniarts.openkeeper.utils.AssetUtils;
+import toniarts.openkeeper.utils.DisplayMode;
+import toniarts.openkeeper.utils.DisplayModeUtils;
+import toniarts.openkeeper.utils.PathUtils;
+import toniarts.openkeeper.utils.SettingUtils;
+import toniarts.openkeeper.utils.Utils;
+
+import java.io.File;
+import java.io.IOException;
+import java.lang.System.Logger;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.ResourceBundle;
+
+/**
+ *
+ * @author ArchDemon
+ */
+public final class MainMenuScreenController implements IMainMenuScreenController {
+
+    private static final Logger logger = System.getLogger(MainMenuScreenController.class.getName());
+
+    private static final String OBJECTIVE_IMAGE_URL = "Textures/Obj_Shots/%s-%d.png";
+
+    private final MainMenuState state;
+    private Nifty nifty;
+    private Screen screen;
+    private static final List<Cutscene> CUTSCENES = new ArrayList<>();
+    private ChatSessionListener chatSessionListener;
+    private LobbySessionListener lobbySessionListener;
+    private String cutsceneMovieName;
+    private final Map<String, Runnable> screenStartHandlers = createScreenStartHandlers();
+
+    /**
+     * A popup instance if some screen should need one
+     */
+    private Element popupElement;
+
+    static {
+        CUTSCENES.add(new Cutscene( 0,"Intro", "INTRO", "${menu.77}", ""));
+        CUTSCENES.add(new Cutscene( 1,"000", "CutSceneLevel1", "${speech.1417}", "149"));
+        CUTSCENES.add(new Cutscene( 2,"001", "CutSceneLevel2", "${speech.1439}", "171"));
+        CUTSCENES.add(new Cutscene( 3,"002", "CutSceneLevel3", "${speech.1435}", "165"));
+        CUTSCENES.add(new Cutscene( 4,"003", "CutSceneLevel4", "${speech.1445}", "177"));
+        CUTSCENES.add(new Cutscene( 5,"004", "CutSceneLevel5", "${speech.1428}", "160"));
+        CUTSCENES.add(new Cutscene( 6,"005", "CutSceneLevel6", "${speech.1426}", "158"));
+        CUTSCENES.add(new Cutscene( 7,"006", "CutSceneLevel7", "${speech.1430}", "162"));
+        CUTSCENES.add(new Cutscene( 8,"007", "CutSceneLevel8", "${speech.1432}", "164"));
+        CUTSCENES.add(new Cutscene( 9,"008", "CutSceneLevel9", "${speech.1441}", "173"));
+        CUTSCENES.add(new Cutscene(10,"009", "CutSceneLevel10", "${speech.1431}", "163"));
+        CUTSCENES.add(new Cutscene(11,"010", "CutSceneLevel11", "${speech.1433}", "167"));
+        CUTSCENES.add(new Cutscene(12,"011", "CutSceneLevel12", "${speech.1419}", "151"));
+        CUTSCENES.add(new Cutscene(13,"012", "CutSceneLevel13", "${speech.1414}", "146"));
+        CUTSCENES.add(new Cutscene(14,"013", "CutSceneLevel14", "${speech.1437}", "169"));
+        CUTSCENES.add(new Cutscene(15,"014", "CutSceneLevel15", "${speech.1416}", "148"));
+        CUTSCENES.add(new Cutscene(16,"015", "CutSceneLevel16", "${speech.1420}", "152"));
+        CUTSCENES.add(new Cutscene(17,"016", "CutSceneLevel17", "${speech.1421}", "153"));
+        CUTSCENES.add(new Cutscene(18,"017", "CutSceneLevel18", "${speech.1443}", "175"));
+        CUTSCENES.add(new Cutscene(19,"018", "CutSceneLevel19", "${speech.1422}", "154"));
+        CUTSCENES.add(new Cutscene(20,"Outro", "Outro", "${menu.2843}",""));
+    }
+
+    public MainMenuScreenController(MainMenuState state, Nifty nifty) {
+        this.state = state;
+        this.nifty = nifty;
+
+        String menuSound = SoundManager.getSoundAssetPath(GlobalCategory.FRONT_END, GlobalType.FRONT_END_CKICK);
+        if (menuSound != null) {
+            this.nifty.registerSound(SOUND_MENU_ID, menuSound);
+        }
+        String buttonSound = SoundManager.getSoundAssetPath(GlobalCategory.GUI_BUTTON_DEFAULT, GlobalType.GUI_BUTTON_CKICK);
+        if (buttonSound != null) {
+            this.nifty.registerSound(SOUND_BUTTON_ID, buttonSound);
+        }
+    }
+
+    /**
+     * Plays the mentor speech of a campaign level.
+     *
+     * @param level the 1-based level number
+     * @param index {@code 0} for the briefing, {@code 1} for winning and
+     * {@code 2} for losing
+     * @return a sound handle, {@code 0} if there is no such speech
+     */
+    private int playLevelSpeech(int level, int index) {
+        MentorType speech = MentorType.forLevel(level, index);
+        if (speech == null) {
+            logger.log(Logger.Level.WARNING, "No mentor speech {0} for level {1}", new Object[]{index, level});
+            return 0;
+        }
+
+        return SoundManager.playSound(SoundCategory.SPEECH_MENTOR, speech.getId());
+    }
+
+    @Override
+    public void selectRandomMap() {
+        state.getLobbyState().setRandomMap();
+    }
+
+    @Override
+    public void selectMPDLevel(String number) {
+        state.selectedLevel = new CampaignLevel(CampaignLevel.LevelType.MPD, Integer.parseInt(number));
+        goToScreen("briefing");
+    }
+
+    @Override
+    public void cancelMapSelection() {
+        nifty.gotoScreen("skirmishLobby");
+    }
+
+    @Override
+    public void mapSelected() {
+        ListBox<TableRow> listBox = screen.findNiftyControl("mapsTable", ListBox.class);
+        int selectedMapIndex = listBox.getSelectedIndices().get(0);
+        state.getLobbyState().setMap(selectedMapIndex);
+        nifty.gotoScreen("skirmishLobby");
+    }
+
+    @Override
+    public void connectToServer() {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    public void multiplayerCreate() {
+
+        TextField player = screen.findNiftyControl("playerName", TextField.class);
+        TextField game = screen.findNiftyControl("gameName", TextField.class);
+        TextField port = screen.findNiftyControl("gamePort", TextField.class);
+
+        state.multiplayerCreate(game.getRealText(),
+                Integer.parseInt(port.getRealText()),
+                player.getRealText());
+
+        // Overlay
+        popupElement = nifty.createPopup("connectingLayer");
+        nifty.showPopup(nifty.getCurrentScreen(), popupElement.getId(), null);
+    }
+
+    @Override
+    public void multiplayerConnect() {
+        /*
+         ListBox<TableRow> games = screen.findNiftyControl("multiplayerGamesTable", ListBox.class);
+         if (games == null) {
+         logger.log(Level.WARNING, "Element multiplayerGamesTable not found");
+         return;
+         }
+         TableRow row = games.getFocusItem();
+         String host = row.getData().get(1);
+         String port = row.getData().get(2);
+         */
+        TextField player = screen.findNiftyControl("playerName", TextField.class);
+        TextField hostAddress = screen.findNiftyControl("hostAddress", TextField.class);
+        if (player == null || player.getRealText().isEmpty()
+                || hostAddress == null || hostAddress.getRealText().isEmpty()) {
+            return;
+        }
+
+        state.multiplayerConnect(hostAddress.getRealText(), player.getRealText());
+
+        // Overlay
+        popupElement = nifty.createPopup("connectingLayer");
+        nifty.showPopup(nifty.getCurrentScreen(), popupElement.getId(), null);
+    }
+
+    protected void showError(String title, String message) {
+        closePopup();
+
+        // Open message
+        popupElement = nifty.createPopup("errorMessage");
+        nifty.showPopup(nifty.getCurrentScreen(), popupElement.getId(), null);
+
+        // Set message text
+        Label titleLabel = popupElement.findNiftyControl("title", Label.class);
+        titleLabel.setText(title);
+        Label messageLabel = popupElement.findNiftyControl("message", Label.class);
+        messageLabel.setText(message);
+    }
+
+    @Override
+    public void multiplayerRefresh() {
+        /*
+         TextField port = screen.findNiftyControl("gamePort", TextField.class);
+         int serverPort = Integer.valueOf(port.getRealText());
+
+         ListBox<TableRow> games = screen.findNiftyControl("multiplayerGamesTable", ListBox.class);
+         if (games == null) {
+         logger.log(Level.WARNING, "Element multiplayerGamesTable not found");
+         return;
+         }
+         games.clear();
+
+         LocalServerSearch searcher = new LocalServerSearch(serverPort) {
+         int i = 0;
+
+         @Override
+         public void onFound(NetworkServer server) {
+         TableRow row = new TableRow(i++, server.getName(), server.getHost(), server.getPort() + "");
+         games.addItem(row);
+         }
+         };
+         searcher.start();
+         */
+    }
+
+    @Override
+    public void playMovie(String movieFile) {
+        state.playMovie(movieFile);
+    }
+
+    @Override
+    public void applyGraphicsSettings() {
+        // Get the controls settings
+        boolean needToRestart = true;
+        Settings settings = Main.getUserSettings();
+        DropDown res = screen.findNiftyControl("resolution", DropDown.class);
+        DropDown bitDepth = screen.findNiftyControl("bitDepth", DropDown.class);
+        DropDown refresh = screen.findNiftyControl("refreshRate", DropDown.class);
+        CheckBox fullscreen = screen.findNiftyControl("fullscreen", CheckBox.class);
+        CheckBox vsync = screen.findNiftyControl("verticalSync", CheckBox.class);
+        DropDown ogl = screen.findNiftyControl("openGl", DropDown.class);
+        DropDown aa = screen.findNiftyControl("antialiasing", DropDown.class);
+        DropDown af = screen.findNiftyControl("anisotropicFiltering", DropDown.class);
+        CheckBox ssao = screen.findNiftyControl("ssao", CheckBox.class);
+        CheckBox gamma = screen.findNiftyControl("gammaCorrection", CheckBox.class);
+        CheckBox hdTextures = screen.findNiftyControl("hdTextures", CheckBox.class);
+        DisplayMode mdm = (DisplayMode) res.getSelection();
+
+        // TODO: See if we need a restart, but keep in mind that the settings are saved in the restart
+        // Set the settings
+        settings.getAppSettings().setResolution(mdm.getWidth(), mdm.getHeight());
+        settings.getAppSettings().setDepthBits((Integer) bitDepth.getSelection());
+        settings.getAppSettings().setFrequency((Integer) refresh.getSelection());
+        settings.getAppSettings().setFullscreen(fullscreen.isChecked());
+        settings.getAppSettings().setVSync(vsync.isChecked());
+        settings.getAppSettings().setRenderer((String) ogl.getSelection());
+        settings.getAppSettings().setSamples((Integer) aa.getSelection());
+        settings.setSetting(Settings.Setting.ANISOTROPY, af.getSelection());
+        settings.setSetting(Settings.Setting.SSAO, ssao.isChecked());
+        settings.getAppSettings().setGammaCorrection(gamma.isChecked());
+
+        // The asset conversion makes or deletes them at the next start
+        Main.getSettings().putBoolean(AssetsConverter.HD_TEXTURES_SETTING, hdTextures.isChecked());
+        SettingUtils.getInstance().saveSettings();
+
+        // This fails and crashes on invalid settings
+        if (needToRestart) {
+            state.restart();
+            nifty.resolutionChanged();
+        }
+        state.app.setViewProcessors();
+    }
+
+    @Override
+    public void startLevel(String type) {
+        state.startLevel(type);
+    }
+
+    @Override
+    public void cancelLevelSelect() {
+        if (state.selectedLevel instanceof CustomMPDLevel) {
+            // go to the custom selection, needs to be checked before because of mpd7
+            goToScreen("myPetDungeonMapSelect");
+        } else if (state.selectedLevel instanceof CampaignLevel lvl && lvl.getType().equals(LevelType.MPD)) {
+            goToScreen("myPetDungeon");
+        } else if (state.selectedLevel != null) {
+            doTransition("254", "selectCampaignLevel", null);
+        } else {
+            // Skirmish / multiplayer debriefing, return to the single player screen
+            doTransition("272", "singlePlayer", "274");
+        }
+        state.selectedLevel = null;
+    }
+
+    @Override
+    public void restartCredits() {
+        Element credits = screen.findElementById("creditList");
+        if (credits != null) {
+            credits.resetEffects();
+            if (!credits.isEffectActive(EffectEventId.onActive)) {
+                credits.startEffect(EffectEventId.onActive);
+            } else {
+                // Screen got changed
+                credits.stopEffect(EffectEventId.onActive);
+            }
+        }
+    }
+
+    @Override
+    public void quitToOS() {
+        state.quitToOS();
+    }
+
+    @Override
+    public void goToScreen(String screen) {
+        nifty.gotoScreen(screen);
+    }
+
+    @Override
+    public void doTransition(String transition, String screen, String transitionStatic) {
+        transition = "EnginePath" + transition;
+        transitionStatic = (transitionStatic == null || "null".equals(transitionStatic) ? null : "EnginePath" + transitionStatic);
+        state.doTransitionAndGoToScreen(transition, screen, transitionStatic);
+    }
+
+    @Override
+    public void bind(Nifty nifty, Screen screen) {
+        this.nifty = nifty;
+        this.screen = screen;
+    }
+
+    @Override
+    public void onStartScreen() {
+        setScreen(nifty.getCurrentScreen());
+
+        Runnable handler = screenStartHandlers.get(screen.getScreenId());
+        if (handler != null) {
+            handler.run();
+        }
+    }
+
+    /**
+     * Maps a screen id to the action that sets it up, so that {@link #onStartScreen()} stays a
+     * simple dispatch instead of one big branching switch
+     */
+    private Map<String, Runnable> createScreenStartHandlers() {
+        Map<String, Runnable> handlers = new HashMap<>();
+        handlers.put("selectCampaignLevel", this::showSelectCampaignLevelScreen);
+        handlers.put("briefing", this::showBriefing);
+        handlers.put(SCREEN_DEBRIEFING_ID, this::fillDebriefingScreen);
+        handlers.put("hiscores", this::generateHiscoreList);
+        handlers.put("optionsGraphics", this::setGraphicsSettingsToGUI);
+        handlers.put("optionsControl", this::setControlSettingsToGUI);
+        handlers.put("optionsSound", this::setSoundSettingsToGUI);
+        handlers.put("movies", this::generateMovieList);
+        handlers.put("cutscene", this::showCutsceneScreen);
+        handlers.put("multiplayer", () -> state.mapSelector.reset());
+        handlers.put("multiplayerWatch", this::showMultiplayerWatchScreen);
+        handlers.put("skirmishLobby", this::showSkirmishLobbyScreen);
+        handlers.put("multiplayerLocal", this::showMultiplayerLocalScreen);
+        handlers.put("skirmishMapSelect", () -> populateMapSelection(true));
+        handlers.put("myPetDungeon", this::unlockMPDMaps);
+        handlers.put("myPetDungeonMapSelect", this::showMyPetDungeonMapSelectScreen);
+        return handlers;
+    }
+
+    private void showSelectCampaignLevelScreen() {
+        state.inputManager.addRawInputListener(state.listener);
+        state.refreshCampaignMap();
+        state.showArrows();
+    }
+
+    private void showCutsceneScreen() {
+        screen.findNiftyControl("cutsceneMovieName", Label.class).setText(cutsceneMovieName);
+    }
+
+    private void showMyPetDungeonMapSelectScreen() {
+        state.mapSelector.setMPD(true);
+        populateMapSelection(false);
+    }
+
+    private void showMultiplayerWatchScreen() {
+        TextField player = screen.findNiftyControl("playerName", TextField.class);
+        TextField hostAddress = screen.findNiftyControl("hostAddress", TextField.class);
+        player.setText(Main.getUserSettings().getSetting(Settings.Setting.PLAYER_NAME).toString());
+        hostAddress.setText(Main.getUserSettings().getSetting(Settings.Setting.MULTIPLAYER_LAST_IP).toString());
+    }
+
+    private void showMultiplayerLocalScreen() {
+        state.mapSelector.reset();
+
+        // Set the game & user name
+        TextField player = screen.findNiftyControl("playerName", TextField.class);
+        TextField game = screen.findNiftyControl("gameName", TextField.class);
+        player.setText(Main.getUserSettings().getSetting(Settings.Setting.PLAYER_NAME).toString());
+        game.setText(Main.getUserSettings().getSetting(Settings.Setting.GAME_NAME).toString());
+    }
+
+    private void showSkirmishLobbyScreen() {
+        LobbyState lobbyState = state.getLobbyState();
+
+        // Set up the players table
+        setupPlayersTable(lobbyState);
+
+        // Add chat listener
+        if (lobbyState.isOnline() && chatSessionListener == null) {
+            Chat chat = screen.findNiftyControl("multiplayerChat", Chat.class);
+            chat.clear();
+            state.getChatService().addChatSessionListener(getChatSessionListener());
+        }
+        screen.findElementById("chatPanel").setVisible(lobbyState.isOnline());
+
+        // Add player listener
+        lobbyState.addLobbySessionListener(getLobbySessionListener());
+
+        // Ask for players and map
+        refreshPlayerList(lobbyState.getLobbySession().getPlayers());
+        populateSelectedMap(state.mapSelector.getMap(lobbyState.getLobbySession().getMap()));
+
+        Label title = screen.findNiftyControl("multiplayerTitle", Label.class);
+        if (title != null) {
+            title.setText(lobbyState.getGameName());
+        }
+        setSkirmishLobbyControlVisibility("multiplayerMapControl", lobbyState.isHosting());
+        setSkirmishLobbyControlVisibility("multiplayerPlayerControl", lobbyState.isHosting());
+
+        // Set the IP, is is really always our IP, not the servers?
+        Label ip = screen.findNiftyControl("ip", Label.class);
+        if (lobbyState.isOnline()) {
+            ip.setText("IP: " + Utils.getLocalIPAddress());
+        } else {
+            ip.setText(null);
+        }
+        TextRenderer renderer = ip.getElement().getRenderer(TextRenderer.class);
+        ip.setWidth(new SizeValue(renderer.getTextWidth() + "px"));
+
+        screen.layoutLayers();
+    }
+
+    private void setSkirmishLobbyControlVisibility(String elementId, boolean visible) {
+        Element element = screen.findElementById(elementId);
+        if (element == null) {
+            return;
+        }
+        if (visible) {
+            element.show();
+        } else {
+            element.hide();
+        }
+    }
+
+    /**
+     * Unlocks my pet dungeon levels if the preceding level was won
+     */
+    private void unlockMPDMaps() {
+        Screen mpdScreen = nifty.getScreen("myPetDungeon");
+        Element mpdList = mpdScreen.findElementById("mpdList");
+        int childCount = mpdList.getChildrenCount();
+
+        for (int i = 2; i < childCount; i++) {
+            Element button = mpdList.findElementById("mpd" + i);
+
+            if (button.getStyle().equals("menuTextDisabled")) {
+                // the level before it must be completed
+                CampaignLevel mpdLevel = new CampaignLevel(LevelType.MPD, i - 1);
+                if (Settings.getInstance().getLevelStatus(mpdLevel).equals(LevelStatus.COMPLETED)) {
+                    TextBuilder unlockedLevel = new TextBuilder();
+                    unlockedLevel.style("menuText");
+                    unlockedLevel.id("mpd" + i);
+                    unlockedLevel.interactOnClick(String.format("selectMPDLevel(%s)", i));
+                    unlockedLevel.text(button.getRenderer(TextRenderer.class).getOriginalText());
+                    unlockedLevel.align(Align.Center);
+
+                    unlockedLevel.build(mpdList, button);
+
+                    // remove the button
+                    button.markForRemoval();
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onEndScreen() {
+
+        // Close any possible popups, otherwise they stay on the screen they were opened on...
+        closePopup();
+
+        if (nifty.getCurrentScreen() == null) {
+            return;
+        }
+
+        switch (nifty.getCurrentScreen().getScreenId()) {
+            case "selectCampaignLevel":
+                state.inputManager.removeRawInputListener(state.listener);
+                state.hideArrows();
+                break;
+
+            case "briefing":
+                state.clearLevelBriefingNarration();
+                break;
+
+            case "debriefing":
+                state.clearLevelDebriefingNarration();
+                state.clearDebriefing();
+                break;
+
+            case "skirmishLobby":
+
+                // Remove the old players table, a bit of a hax
+                TableControl playersTable = screen.findControl(PLAYER_LIST_ID, TableControl.class);
+                if (playersTable != null) {
+                    playersTable.getElement().markForRemoval();
+                }
+
+                removeLobbyListeners();
+
+                break;
+        }
+    }
+
+    private void removeLobbyListeners() {
+        if (chatSessionListener != null) {
+            ChatClientService ccs = state.getChatService();
+            if (ccs != null) {
+                ccs.removeChatSessionListener(getChatSessionListener());
+            }
+        }
+        LobbyState ls = state.getLobbyState();
+        if (ls != null) {
+            if (lobbySessionListener != null) {
+                ls.removeLobbySessionListener(getLobbySessionListener());
+            }
+        }
+        chatSessionListener = null;
+        lobbySessionListener = null;
+    }
+
+    private void closePopup() {
+        if (popupElement != null) {
+            nifty.closePopup(popupElement.getId());
+            popupElement = null;
+        }
+    }
+
+    private void setScreen(Screen screen) {
+        this.screen = screen;
+    }
+
+    @NiftyEventSubscriber(id = "resolution")
+    public void onResolutionChanged(final String id, final DropDownSelectionChangedEvent<DisplayMode> event) {
+
+        // Set the bit depths
+        DropDown bitDepth = screen.findNiftyControl("bitDepth", DropDown.class);
+        bitDepth.clear();
+        bitDepth.addAllItems(event.getSelection().getBitDepths());
+        bitDepth.selectItemByIndex(bitDepth.itemCount() - 1);
+
+        // Set the refresh dropdown
+        DropDown refresh = screen.findNiftyControl("refreshRate", DropDown.class);
+        refresh.clear();
+        refresh.addAllItems(event.getSelection().getRefreshRates());
+        refresh.selectItemByIndex(refresh.itemCount() - 1);
+        CheckBox fullscreen = screen.findNiftyControl("fullscreen", CheckBox.class);
+        refresh.setEnabled(fullscreen.isChecked());
+    }
+
+    @NiftyEventSubscriber(id = "fullscreen")
+    public void onFullscreenChanged(final String id, final CheckBoxStateChangedEvent event) {
+
+        //Set the refresh dropdown
+        DropDown refresh = screen.findNiftyControl("refreshRate", DropDown.class);
+        if (event.isChecked()) {
+            refresh.enable();
+        } else {
+            refresh.disable();
+        }
+    }
+
+    @NiftyEventSubscriber(id = "multiplayerChat")
+    public void onChatTextSend(final String id, final ChatTextSendEvent event) {
+        state.chatTextSend(event.getText());
+    }
+
+    @NiftyEventSubscriber(id = "mapsTable")
+    public void onListBoxSelectionChanged(final String id, final ListBoxSelectionChangedEvent<TableRow> event) {
+
+        if (event.getSelectionIndices().isEmpty()) {
+            return;
+        }
+
+        IKwdMap map = state.mapSelector.getMaps().get(event.getSelectionIndices().get(0));
+        if (state.mapSelector.isMPD()) {
+            // on mpd we show the briefing
+            state.selectedLevel = new CustomMPDLevel(map);
+            goToScreen("briefing");
+        } else {
+            // The map title
+            populateSelectedMap(map);
+        }
+    }
+
+    private void generateHiscoreList() {
+        Element hiscoreList = screen.findElementById("hiscoreList");
+
+        if (hiscoreList != null) {
+            for (Element oldElement : hiscoreList.getChildren()) {
+                nifty.removeElement(screen, oldElement);
+            }
+
+            ControlBuilder hiscoreDesc = new ControlBuilder("hiscoreHead", "hiscoreRow");
+            hiscoreDesc.parameter("rank", "${menu.80}");
+            hiscoreDesc.parameter("score", "${menu.82}");
+            hiscoreDesc.parameter("level", "${menu.2042}");
+            hiscoreDesc.parameter("user", "${menu.83}");
+            hiscoreDesc.style("nifty-hiscore-head");
+            hiscoreDesc.build(hiscoreList);
+
+            int i = 0;
+            for (HiScores.HiScoresEntry hiscore : HiScores.load().getEntries()) {
+                ControlBuilder hiscoreControl = new ControlBuilder("hiscore" + i++, "hiscoreRow");
+                hiscoreControl.parameter("rank", i + "");
+                hiscoreControl.parameter("score", hiscore.getScore() + "");
+                hiscoreControl.parameter("level", hiscore.getLevel());
+                hiscoreControl.parameter("user", hiscore.getName());
+                hiscoreControl.build(hiscoreList);
+            }
+        }
+    }
+
+    /**
+     * Finds the cutscene registered for the given campaign level
+     *
+     * @param level the campaign level number
+     * @return the cutscene, or {@code null} if the level has none
+     */
+    public static Cutscene getCutscene(int level) {
+        for (Cutscene cutscene : CUTSCENES) {
+            if (cutscene.level == level) {
+                return cutscene;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Shows the cutscene screen, a black screen with the movie name centered on it. The actual
+     * speech and movie playback is driven by {@link CutsceneState}.
+     *
+     * @param movieName the movie name to display
+     */
+    public void showCutscene(String movieName) {
+        this.cutsceneMovieName = movieName;
+        nifty.gotoScreen(SCREEN_CUTSCENE_ID);
+    }
+
+    /**
+     * Generates the movie list
+     */
+    private void generateMovieList() {
+        Element movies = nifty.getScreen("movies").findElementById("movieList");
+        if (movies == null) {
+            return;
+        }
+
+        int index = 0;
+        String image;
+        String action;
+        for (Cutscene cutscene : CUTSCENES) {
+            if (cutscene.isViewable()) {
+                image = cutscene.image;
+                action = "playMovie(" + cutscene.click + ")";
+            } else {
+                image = "Unavailable";
+                action = "goToScreen(cutsceneLocked)";
+            }
+
+            final String imagePath = "Textures/Mov_Shots/M-" + image + "-0.png";
+
+            if (movies.getChildrenCount() < CUTSCENES.size()) {
+                // initialize movie list
+                ControlBuilder control = new ControlBuilder("movie" + index, "movieButton");
+                control.parameter("image", imagePath);
+                control.parameter("click", action);
+                control.parameter("moviename", cutscene.moviename);
+                control.build(movies);
+            } else {
+                // modify movie list if changed
+                Element element = movies.findElementById("movie" + index);
+                final String oldImagePath = element.getElementType().getAttributes().get("image");
+
+                // has the control changed?
+                if (oldImagePath == null || !oldImagePath.contains(image)) {
+                    // insert before the old element
+                    ControlBuilder control = new ControlBuilder("movie" + index, "movieButton");
+                    control.parameter("image", imagePath);
+                    control.parameter("click", action);
+                    control.parameter("moviename", cutscene.moviename);
+                    control.build(movies, element);
+
+                    // remove the old element
+                    element.markForRemoval();
+                }
+            }
+            index++;
+        }
+    }
+
+    /**
+     * Set ups a sub objective text
+     *
+     * @param id the element ID
+     * @param caption the text
+     * @return returns the element
+     */
+    private Label setupSubObjectiveLabel(String id, String caption) {
+
+        // Get the actual label and set the text
+        Label label = screen.findNiftyControl(id, Label.class);
+        label.setText(caption.isEmpty() ? "" : "- ".concat(caption));
+
+        // Measure the text height so that the element can be arranged to the the screen without overlapping the othe sub objectives
+        TextRenderer renderer = label.getElement().getRenderer(TextRenderer.class);
+        label.setHeight(new SizeValue(renderer.getTextHeight() + "px"));
+
+        return label;
+    }
+
+    /**
+     * Sets the current setting values to the GUI
+     */
+    private void setGraphicsSettingsToGUI() {
+
+        // Application settings
+        AppSettings settings = Main.getUserSettings().getAppSettings();
+
+        DisplayMode mdm = new DisplayMode(settings);
+        List<DisplayMode> resolutions = DisplayModeUtils.getInstance().getDisplayModes();
+        int resolutionSelectedIndex = Collections.binarySearch(resolutions, mdm);
+
+        // Get values to the settings screen
+        // Resolutions
+        DropDown res = screen.findNiftyControl("resolution", DropDown.class);
+        res.addAllItems(resolutions);
+        if (resolutionSelectedIndex >= 0) {
+            res.selectItemByIndex(resolutionSelectedIndex);
+        }
+
+        // Bit depths and Refresh rates
+        DropDown refresh = screen.findNiftyControl("refreshRate", DropDown.class);
+        DropDown bitDepths = screen.findNiftyControl("bitDepth", DropDown.class);
+
+        if (resolutionSelectedIndex >= 0) {
+            refresh.addAllItems(resolutions.get(resolutionSelectedIndex).getRefreshRates());
+            refresh.selectItem(settings.getFrequency());
+            bitDepths.addAllItems(resolutions.get(resolutionSelectedIndex).getBitDepths());
+            bitDepths.selectItem(settings.getDepthBits());
+        } else {
+            refresh.addAllItems(mdm.getRefreshRates());
+            bitDepths.addAllItems(mdm.getBitDepths());
+        }
+        if (!settings.isFullscreen()) {
+            refresh.disable();
+        }
+
+        // Fullscreen
+        CheckBox fullscreen = screen.findNiftyControl("fullscreen", CheckBox.class);
+        fullscreen.setChecked(settings.isFullscreen());
+        fullscreen.setEnabled(DisplayModeUtils.getInstance().isFullScreenSupported());
+
+        // VSync
+        CheckBox vsync = screen.findNiftyControl("verticalSync", CheckBox.class);
+        vsync.setChecked(settings.isVSync());
+
+        // Antialiasing
+        DropDown aa = screen.findNiftyControl("antialiasing", DropDown.class);
+        aa.addAllItems(Settings.SAMPLES);
+        if (Settings.SAMPLES.contains(settings.getSamples())) {
+            aa.selectItem(settings.getSamples());
+        } else {
+            aa.addItem(settings.getSamples());
+            aa.selectItem(settings.getSamples());
+        }
+
+        // Anisotropic filtering
+        DropDown af = screen.findNiftyControl("anisotropicFiltering", DropDown.class);
+        af.addAllItems(Settings.ANISOTROPHIES);
+        int selectedAF = Main.getUserSettings().getInteger(Settings.Setting.ANISOTROPY);
+        if (!Settings.ANISOTROPHIES.contains(selectedAF)) {
+            af.addItem(selectedAF);
+        }
+        af.selectItem(selectedAF);
+
+        // OpenGL
+        DropDown ogl = screen.findNiftyControl("openGl", DropDown.class);
+        ogl.addAllItems(Settings.OPENGL);
+        ogl.selectItem(settings.getRenderer());
+
+        // SSAO
+        CheckBox ssao = screen.findNiftyControl("ssao", CheckBox.class);
+        ssao.setChecked(Main.getUserSettings().getBoolean(Settings.Setting.SSAO));
+
+        // Gamma correction
+        CheckBox gamma = screen.findNiftyControl("gammaCorrection", CheckBox.class);
+        gamma.setChecked(settings.isGammaCorrection());
+
+        // HD textures
+        CheckBox hdTextures = screen.findNiftyControl("hdTextures", CheckBox.class);
+        hdTextures.setChecked(Main.getSettings().getBoolean(AssetsConverter.HD_TEXTURES_SETTING));
+    }
+
+    private void setControlSettingsToGUI() {
+        ListBox<TableRow> listBox = screen.findNiftyControl("keyboardSetup", ListBox.class);
+        int i = 0;
+        int selected = 0;
+        listBox.clear();
+        List<Settings.Setting> settings = Settings.Setting.getSettings(Settings.SettingCategory.CONTROLS);
+
+        for (Settings.Setting setting : settings) {
+            String keys = "";
+            if (setting.getSpecialKey() != null) {
+                keys = (KeyNames.getName(setting.getSpecialKey()) + " + ").replace("Left ", "").replace("Right ", "");
+            }
+            keys += KeyNames.getName((int) setting.getDefaultValue()).replace("Left ", "").replace("Right ", "");
+            TableRow row = new TableRow(i++, String.format("${menu.%s}", setting.getTranslationKey()), keys);
+            listBox.addItem(row);
+        }
+        listBox.selectItemByIndex(selected);
+
+        screen.findNiftyControl("mouseSensitivity", Slider.class).setValue((float) Settings.Setting.MOUSE_SENSITIVITY.getDefaultValue());
+        screen.findNiftyControl("gameSpeed", Slider.class).setValue((float) Settings.Setting.GAME_SPEED.getDefaultValue());
+        screen.findNiftyControl("scrollSpeed", Slider.class).setValue((float) Settings.Setting.SCROLL_SPEED.getDefaultValue());
+        screen.findNiftyControl("invertMouse", CheckBox.class).setChecked((boolean) Settings.Setting.MOUSE_INVERT.getDefaultValue());
+    }
+
+    private void populateSelectedMap(IKwdMap map) {
+
+        // The map title
+        Label label = screen.findNiftyControl("mapNameTitle", Label.class);
+        label.setText(map == null ? "No maps found from " + PathUtils.DKII_MAPS_FOLDER : map.getGameLevel().getName());
+        NiftyUtils.resetContraints(label);
+
+        if (map != null) {
+
+            // Player count
+            label = screen.findNiftyControl("playerCount", Label.class);
+            label.setText(": " + map.getGameLevel().getPlayerCount());
+            NiftyUtils.resetContraints(label);
+
+            // Map image
+            Element mapImage = screen.findElementById("mapImage");
+            String thumbnail = state.getMapThumbnail(map);
+            NiftyImage img = nifty.createImage(thumbnail, true);
+            mapImage.getRenderer(ImageRenderer.class).setImage(img);
+
+            // The placeholder is a game texture, so it may be an HD copy
+            boolean placeholder = MainMenuState.NO_THUMBNAIL.equals(thumbnail);
+            mapImage.setConstraintWidth(new SizeValue((placeholder ? MainMenuState.NO_THUMBNAIL_SIZE : img.getWidth()) + "px"));
+            mapImage.setConstraintHeight(new SizeValue((placeholder ? MainMenuState.NO_THUMBNAIL_SIZE : img.getHeight()) + "px"));
+        }
+
+        // Re-populate
+        screen.layoutLayers();
+    }
+
+    /**
+     * Populate the map selection with given maps
+     */
+    private void populateMapSelection(final boolean selectMap) {
+        ListBox<TableRow> listBox = screen.findNiftyControl("mapsTable", ListBox.class);
+        int i = 0;
+        listBox.clear();
+        for (IKwdMap kwd : state.mapSelector.getMaps()) {
+
+            String name = kwd.getGameLevel().getName();
+            if (kwd.getGameLevel().getLvlFlags().contains(GameLevel.LevFlag.IS_MY_PET_DUNGEON_LEVEL)) {
+                // the resource tables in all the other levels are completely wrong, so we just use it for custom mpd maps
+                name = kwd.getGameLevel().getLevelName().isEmpty() ? kwd.getGameLevel().getName() : kwd.getGameLevel().getLevelName();
+            }
+            listBox.addItem(new TableRow(i, name,
+                    String.valueOf(kwd.getGameLevel().getPlayerCount()),
+                    String.format("%s x %s", kwd.getMap().getWidth(), kwd.getMap().getHeight())));
+
+            if (selectMap && kwd.equals(state.mapSelector.getMap())) {
+                listBox.selectItemByIndex(i);
+            }
+            i++;
+        }
+    }
+
+    private LobbySessionListener getLobbySessionListener() {
+        if (lobbySessionListener == null) {
+            lobbySessionListener = new LobbySessionListener() {
+
+                @Override
+                public void onPlayerListChanged(List<ClientInfo> players) {
+                    refreshPlayerList(players);
+                }
+
+                @Override
+                public void onMapChanged(String mapName) {
+                    populateSelectedMap(state.mapSelector.getMap(mapName));
+                }
+
+                @Override
+                public void onGameStarted(String mapName, List<ClientInfo> players) {
+
+                    // Load the game up
+                    removeLobbyListeners();
+                }
+            };
+        }
+        return lobbySessionListener;
+    }
+
+    private void refreshPlayerList(List<ClientInfo> players) {
+        TableControl<PlayerTableRow> playersList = screen.findNiftyControl(PLAYER_LIST_ID, TableControl.class);
+        LobbyState lobbyState = state.getLobbyState();
+        if (playersList != null && lobbyState != null) {
+
+            // Get the selection, so that we can restore it possibly
+            ClientInfo selectedClient = null;
+            if (!playersList.getSelection().isEmpty()) {
+                selectedClient = playersList.getSelection().get(0).getClientInfo();
+            }
+
+            playersList.clear();
+
+            // Populate the players list
+            int index = -1;
+            int i = 0;
+            for (ClientInfo clientInfo : players) {
+                if (clientInfo.equals(selectedClient)) {
+                    index = i;
+                }
+                playersList.addItem(new PlayerTableRow(clientInfo, playersList.itemCount(), clientInfo.getKeeper().isAi() ? Utils.getMainTextResourceBundle().getString(clientInfo.getKeeper().getAiType().getTranslationKey()) : clientInfo.getName(),
+                        "", lobbyState.isOnline() ? Long.toString(clientInfo.getPing()) : "", lobbyState.isOnline() ? Integer.toString(clientInfo.getSystemMemory()) : "", clientInfo.isReady()
+                ));
+                i++;
+            }
+
+            // Restore selection
+            if (index > -1) {
+                playersList.selectItemByIndex(index);
+            }
+        }
+    }
+
+    @NiftyEventSubscriber(id = PLAYER_LIST_ID)
+    public void onPlayerListSelectionChanged(final String id, final ListBoxSelectionChangedEvent<PlayerTableRow> event) {
+        List<PlayerTableRow> selection = event.getSelection();
+        Element element = screen.findElementById("changeAi");
+        if (selection.isEmpty() || !selection.get(0).getClientInfo().getKeeper().isAi()) {
+            element.hide();
+        } else {
+            TextRenderer textRenderer = element.getRenderer(TextRenderer.class);
+            ResourceBundle rb = Utils.getMainTextResourceBundle();
+            String text = rb.getString("2121") + ": " + rb.getString(selection.get(0).getClientInfo().getKeeper().getAiType().getTranslationKey());
+            textRenderer.setText(text);
+            element.setConstraintWidth(new SizeValue(textRenderer.getFont().getWidth(text) + "px"));
+            element.show();
+
+            // Recalculate
+            element.getParent().layoutElements();
+        }
+    }
+
+    @Override
+    public void cancelMultiplayer() {
+        LobbyState ls = state.getLobbyState();
+
+        // Disconnect and dismantle
+        removeLobbyListeners();
+        state.shutdownMultiplayer();
+
+        // Go back to where we were, if we ever left...
+        if (ls != null) {
+            if (ls.isOnline()) {
+                if (ls.isHosting()) {
+                    goToScreen("multiplayerLocal");
+                } else {
+                    goToScreen("multiplayerWatch");
+                }
+            } else {
+                doTransition("272", "singlePlayer", "274");
+            }
+        }
+    }
+
+    public void closeErrorMessage() {
+        closePopup();
+
+        // This is really now just used for MP error messages
+        cancelMultiplayer();
+    }
+
+    @Override
+    public void newCampaign() {
+        if (Settings.getInstance().getNextPlayableLevel() > 1) {
+            closePopup();
+            popupElement = nifty.createPopup("confirmNewCampaign");
+            nifty.showPopup(nifty.getCurrentScreen(), popupElement.getId(), null);
+        } else {
+            doTransition("251", "selectCampaignLevel", null);
+        }
+    }
+
+    @Override
+    public void confirmNewCampaign() {
+        closePopup();
+        Settings.getInstance().resetCampaignProgress();
+        try {
+            Settings.getInstance().save();
+        } catch (IOException ex) {
+            logger.log(Logger.Level.ERROR, ex);
+        }
+        state.refreshCampaignMap();
+        doTransition("251", "selectCampaignLevel", null);
+    }
+
+    @Override
+    public void cancelNewCampaign() {
+        closePopup();
+    }
+
+    public ChatSessionListener getChatSessionListener() {
+        if (chatSessionListener == null) {
+            chatSessionListener = new ChatSessionListener() {
+
+                private final Chat chat = screen.findNiftyControl("multiplayerChat", Chat.class);
+
+                @Override
+                public void playerJoined(int playerId, String playerName) {
+                    state.app.enqueue(() -> {
+                        chat.receivedChatLine(playerName + " joined...", playerId, (short) 0);
+                    });
+                }
+
+                @Override
+                public void newMessage(int playerId, Short keeperId, String playerName, String message) {
+                    state.app.enqueue(() -> {
+                        chat.receivedChatLine(playerName + ": " + message, playerId, (keeperId != null ? keeperId : 0));
+                    });
+                }
+
+                @Override
+                public void playerLeft(int playerId, String playerName) {
+                    state.app.enqueue(() -> {
+                        chat.receivedChatLine(playerName + " left...", playerId, (short) 0);
+                    });
+                }
+            };
+        }
+        return chatSessionListener;
+    }
+
+    @Override
+    public void startSkirmish() {
+
+        // Start a local lobby
+        state.createLocalLobby();
+
+        // Go to screen
+        doTransition("271", "skirmishLobby", "273");
+    }
+
+    private void setupPlayersTable(LobbyState lobbyState) {
+        Element playersPanel = screen.findElementById("playersPanel");
+
+        // Build a new one
+        PlayerTableBuilder cb = new PlayerTableBuilder(PLAYER_LIST_ID,
+                new TableColumn("${menu.1688}", 34, String.class, new Color("#32050c30")),
+                new TableColumn(lobbyState.isOnline() ? "${menu.263}" : "", 33, String.class, new Color("#32050c30")),
+                new TableColumn(lobbyState.isOnline() ? "${menu.195}" : "", 11, String.class, new Color("#00752430")),
+                new TableColumn(lobbyState.isOnline() ? "${menu.1499}" : "", 11, String.class, new Color("#00779e30")),
+                new TableColumn(null, 11, Boolean.class, new Color("#00752430"))
+        ) {
+            {
+                selectionModeSingle();
+                displayItems(4);
+                optionalVerticalScrollbar();
+            }
+        };
+        cb.build(playersPanel);
+    }
+
+    @Override
+    public void addComputerPlayer() {
+        state.getLobbyState().getLobbyService().addPlayer();
+    }
+
+    @Override
+    public void kickPlayer() {
+        TableControl<PlayerTableRow> playersList = screen.findNiftyControl(PLAYER_LIST_ID, TableControl.class);
+        if (playersList != null && !playersList.getSelection().isEmpty()) {
+            ClientInfo clientInfo = playersList.getSelection().get(0).getClientInfo();
+
+            // See that we wont kick ourselves out
+            if (state.getLobbyState().getLobbySession().getPlayerId() != clientInfo.getId()) {
+                state.getLobbyState().getLobbyService().removePlayer(clientInfo);
+            }
+        }
+    }
+
+    @Override
+    public void setPlayerReady() {
+        LobbySession lobbySession = state.getLobbyState().getLobbySession();
+        lobbySession.setReady(!lobbySession.isReady());
+    }
+
+    @Override
+    public void changeAI() {
+        TableControl<PlayerTableRow> playersList = screen.findNiftyControl(PLAYER_LIST_ID, TableControl.class);
+        if (playersList != null && !playersList.getSelection().isEmpty()) {
+            ClientInfo clientInfo = playersList.getSelection().get(0).getClientInfo();
+            if (clientInfo.getKeeper() != null && clientInfo.getKeeper().isAi()) {
+
+                // Get "next"
+                List<AI.AIType> types = Arrays.asList(AI.AIType.values());
+                int index = types.indexOf(clientInfo.getKeeper().getAiType());
+                state.getLobbyState().getLobbyService().changeAIType(clientInfo, index + 1 == types.size() ? types.get(0) : types.get(index + 1));
+            }
+        }
+    }
+
+    private void setSoundSettingsToGUI() {
+        Settings settings = Main.getUserSettings();
+        DropDown<AudioOutputMode> output = screen.findNiftyControl("audioOutputMode", DropDown.class);
+        output.clear();
+        output.addAllItems(Arrays.asList(AudioOutputMode.values()));
+        output.selectItem(AudioOutputMode.fromSetting(settings.getSetting(Settings.Setting.AUDIO_OUTPUT_MODE)));
+        screen.findElementById("audioOutputStatus").getRenderer(TextRenderer.class)
+                .setText(AudioOutput.getStatus().applied() ? "" : AudioOutput.getStatus().message());
+
+        Slider masterVolume = screen.findNiftyControl("masterVolume", Slider.class);
+        Slider voiceVolume = screen.findNiftyControl("voiceVolume", Slider.class);
+        Slider musicVolume = screen.findNiftyControl("musicVolume", Slider.class);
+        Slider sfxVolume = screen.findNiftyControl("sfxVolume", Slider.class);
+
+        CheckBox voiceEnabled = screen.findNiftyControl("voiceEnabled", CheckBox.class);
+        CheckBox musicEnabled = screen.findNiftyControl("musicEnabled", CheckBox.class);
+        CheckBox sfxEnabled = screen.findNiftyControl("sfxEnabled", CheckBox.class);
+
+        masterVolume.setValue(settings.getFloat(Settings.Setting.MASTER_VOLUME));
+        voiceVolume.setValue(settings.getFloat(Settings.Setting.VOICE_VOLUME));
+        musicVolume.setValue(settings.getFloat(Settings.Setting.MUSIC_VOLUME));
+        sfxVolume.setValue(settings.getFloat(Settings.Setting.SFX_VOLUME));
+
+        voiceEnabled.setChecked(settings.getBoolean(Settings.Setting.VOICE_ENABLED));
+        musicEnabled.setChecked(settings.getBoolean(Settings.Setting.MUSIC_ENABLED));
+        sfxEnabled.setChecked(settings.getBoolean(Settings.Setting.SFX_ENABLED));
+    }
+
+    @Override
+    public void applySoundSettings() {
+        try {
+            // Get the controls settings
+            Settings settings = Main.getUserSettings();
+
+            Slider masterVolume = screen.findNiftyControl("masterVolume", Slider.class);
+            Slider voiceVolume = screen.findNiftyControl("voiceVolume", Slider.class);
+            Slider musicVolume = screen.findNiftyControl("musicVolume", Slider.class);
+            Slider sfxVolume = screen.findNiftyControl("sfxVolume", Slider.class);
+
+            CheckBox voiceEnabled = screen.findNiftyControl("voiceEnabled", CheckBox.class);
+            CheckBox musicEnabled = screen.findNiftyControl("musicEnabled", CheckBox.class);
+            CheckBox sfxEnabled = screen.findNiftyControl("sfxEnabled", CheckBox.class);
+
+            // Set the settings
+            settings.setSetting(Settings.Setting.MASTER_VOLUME, masterVolume.getValue());
+            settings.setSetting(Settings.Setting.VOICE_VOLUME, voiceVolume.getValue());
+            settings.setSetting(Settings.Setting.MUSIC_VOLUME, musicVolume.getValue());
+            settings.setSetting(Settings.Setting.SFX_VOLUME, sfxVolume.getValue());
+
+            settings.setSetting(Settings.Setting.VOICE_ENABLED, voiceEnabled.isChecked());
+            settings.setSetting(Settings.Setting.MUSIC_ENABLED, musicEnabled.isChecked());
+            settings.setSetting(Settings.Setting.SFX_ENABLED, sfxEnabled.isChecked());
+
+            DropDown<AudioOutputMode> output = screen.findNiftyControl("audioOutputMode", DropDown.class);
+            AudioOutputMode mode = output.getSelection();
+            if (mode == null) mode = AudioOutputMode.AUTO;
+            settings.setSetting(Settings.Setting.AUDIO_OUTPUT_MODE, mode.name());
+            AudioOutput.Result result = AudioOutput.apply(mode);
+            screen.findElementById("audioOutputStatus").getRenderer(TextRenderer.class).setText(result.applied() ? "" : result.message());
+            Main.setupNiftySound(nifty);
+            Settings.getInstance().save();
+            if (result.applied()) {
+                nifty.gotoScreen(SCREEN_OPTIONS_MAIN_ID);
+            }
+        } catch (IOException ex) {
+            logger.log(Logger.Level.ERROR, ex);
+        }
+    }
+
+    public static final class Cutscene {
+
+        protected String image;
+        protected String click;
+        protected String moviename;
+        private String speechId;
+        private int level;
+
+        public Cutscene(final int level, final String image,final String click,final String moviename, final String speechId) {
+            this.level = level;
+            this.image = image;
+            this.click = click;
+            this.moviename = moviename;
+            this.speechId = speechId;
+        }
+
+        /**
+         * Check if a cutscene is unlocked
+         *
+         * @return true if movie is viewable by the user
+         */
+        public boolean isViewable() {
+            boolean status = false;
+            if (this.click.startsWith("CutSceneLevel")) {
+                final int number = Integer.parseInt(this.image) + 1;
+
+                CampaignLevel levela;
+                CampaignLevel levelb;
+
+                switch (number) {
+                    case 11:
+                        levela = new CampaignLevel(LevelType.Level, number, "a");
+                        levelb = new CampaignLevel(LevelType.Level, number, "b");
+                        CampaignLevel levelc = new CampaignLevel(LevelType.Level, number, "c");
+                        status = isLevelCompleted(levela) || isLevelCompleted(levelb) || isLevelCompleted(levelc);
+                        break;
+                    case 6:
+                    case 15:
+                        levela = new CampaignLevel(LevelType.Level, number, "a");
+                        levelb = new CampaignLevel(LevelType.Level, number, "b");
+                        status = isLevelCompleted(levela) || isLevelCompleted(levelb);
+                        break;
+                    default:
+                        status = isLevelCompleted(new CampaignLevel(LevelType.Level, number));
+                }
+            } else if (this.image.equals("Outro")) {
+                status = isLevelCompleted(new CampaignLevel(LevelType.Level, 20));
+            } else if (this.image.equals("Intro")) {
+                // Intro is always visible
+                status = true;
+            }
+
+            return status;
+        }
+
+        private boolean isLevelCompleted(CampaignLevel level) {
+            return Settings.getInstance().getLevelStatus(level).equals(LevelStatus.COMPLETED);
+        }
+
+        public String getSpeechId() {
+            return speechId;
+        }
+    }
+
+    private void showBriefing() {
+        // Set the dynamic values
+        Label levelTitle = screen.findNiftyControl("levelTitle", Label.class);
+        // In the level data there are the text IDs for these, but they don't make sense
+        Label mainObjective = screen.findNiftyControl("mainObjective", Label.class);
+        Element mainObjectiveImage = screen.findElementById("mainObjectiveImage");
+        Element mainObjectivePanel = screen.findElementById("mainObjectivePanel");
+        Element subObjectivePanel = screen.findElementById("subObjectivePanel");
+
+        NiftyImage img = null;
+        GameLevel gameLevel = state.selectedLevel.getKwdMap().getGameLevel();
+
+        if (!gameLevel.hasBriefing()) {
+            levelTitle.setText("No Briefing available");
+            mainObjectivePanel.hide();
+            subObjectivePanel.hide();
+            return;
+        }
+
+        mainObjectivePanel.show();
+        levelTitle.setText(gameLevel.getTitle());
+        mainObjective.setText(gameLevel.getMainObjective());
+
+        String objectiveImage = AssetUtils.getCanonicalAssetKey(String.format(OBJECTIVE_IMAGE_URL, gameLevel.getName(), 0));
+        try {
+            img = nifty.createImage(objectiveImage, true);
+            mainObjectiveImage.getRenderer(ImageRenderer.class).setImage(img);
+            mainObjectiveImage.show();
+        } catch (Exception e) {
+            logger.log(Logger.Level.WARNING, "Can''t find image {0}", objectiveImage);
+            mainObjectiveImage.hide();
+        }
+
+        String subText1 = gameLevel.getSubObjective1();
+        String subText2 = gameLevel.getSubObjective2();
+        String subText3 = gameLevel.getSubObjective3();
+
+        subObjectivePanel.hide();
+        if (!(subText1.isEmpty() && subText2.isEmpty() && subText3.isEmpty())) {
+            // We have subobjectives
+            subObjectivePanel.show();
+            setupSubObjectiveLabel("subObjective1", subText1);
+            setupSubObjectiveLabel("subObjective2", subText2);
+            Label subObjective = setupSubObjectiveLabel("subObjective3", subText3);
+            // Fix the layout
+            subObjective.getElement().getParent().layoutElements();
+            Element subObjectiveImage = screen.findElementById("subObjectiveImage");
+            subObjectiveImage.hide();
+
+            if (state.selectedLevel instanceof CampaignLevel lvl && lvl.getType().equals(LevelType.Level)) {
+                objectiveImage = AssetUtils.getCanonicalAssetKey(String.format(OBJECTIVE_IMAGE_URL, gameLevel.getName(), 1));
+                try {
+                    img = nifty.createImage(objectiveImage, true);
+                    subObjectiveImage.getRenderer(ImageRenderer.class).setImage(img);
+                    subObjectiveImage.show();
+                } catch (Exception e) {
+                    logger.log(Logger.Level.WARNING, "Can''t find image {0}", objectiveImage);
+                    subObjectiveImage.hide();
+                }
+
+                // Play some tunes!!
+                state.setLevelBriefing(playLevelSpeech(lvl.getLevel(), 0));
+            }
+        }
+    }
+
+    /**
+     * Go to the debriefing screen, which fills itself in once it has started
+     */
+    public void showDebriefing() {
+        goToScreen(SCREEN_DEBRIEFING_ID);
+    }
+
+    /**
+     * Fill in the debriefing screen. Nifty binds the controls of a screen only when the screen
+     * starts, a label set before that keeps its default text.
+     */
+    private void fillDebriefingScreen() {
+        IKwdFile level = state.getDebriefingLevel();
+        if (level == null) {
+            return;
+        }
+        Screen deScreen = screen;
+
+        Label levelTitle = deScreen.findNiftyControl("dLevelTitle", Label.class);
+
+        Element mainObjectiveImage = deScreen.findElementById("dMainObjectiveImage");
+        Element subObjectiveImage = deScreen.findElementById("dSubObjectiveImage");
+
+        GameLevel gameLevel = level.getGameLevel();
+        levelTitle.setText(gameLevel.getTitle());
+        CampaignLevel playedLevel = state.getDebriefingCampaignLevel();
+        String objectiveImage = AssetUtils.getCanonicalAssetKey(String.format(OBJECTIVE_IMAGE_URL, gameLevel.getName(), 0));
+        try {
+            NiftyImage img = nifty.createImage(objectiveImage, true);
+            mainObjectiveImage.show();
+            mainObjectiveImage.getRenderer(ImageRenderer.class).setImage(img);
+
+        } catch (Exception e) {
+            logger.log(Logger.Level.WARNING, "Can''t find image {0}", objectiveImage);
+            mainObjectiveImage.hide();
+        }
+
+        Label totalEvilRating = deScreen.findNiftyControl("totalEvilRating", Label.class);
+        Label overallTotalEvilRating = deScreen.findNiftyControl("overallTotalEvilRating", Label.class);
+        Label specialsFound = deScreen.findNiftyControl("specialsFound", Label.class);
+
+        subObjectiveImage.hide();
+        if (playedLevel != null && playedLevel.getType().equals(LevelType.Level)) {
+            objectiveImage = AssetUtils.getCanonicalAssetKey(String.format(OBJECTIVE_IMAGE_URL, gameLevel.getName(), 1));
+            try {
+                NiftyImage img = nifty.createImage(objectiveImage, true);
+                subObjectiveImage.getRenderer(ImageRenderer.class).setImage(img);
+                subObjectiveImage.show();
+            } catch (Exception e) {
+                logger.log(Logger.Level.WARNING, "Can''t find image {0}", objectiveImage);
+                subObjectiveImage.hide();
+            }
+        }
+
+        // FIXME: GameResult has no other data yet and also get it from the client state directly
+        boolean levelWon = state.isDebriefingLevelWon();
+        deScreen.findNiftyControl("levelWon", Label.class).setText(levelWon ? "${menu.21}" : "${menu.22}");
+        int timeTaken = 0; //Math.round(result.getData(GameResult.ResultType.TIME_TAKEN));
+        deScreen.findNiftyControl("timeTaken", Label.class).setText(Utils.timeToString(timeTaken));
+
+        // Play debriefing narration
+        if (playedLevel != null) {
+            state.setLevelDebriefing(playLevelSpeech(playedLevel.getLevel(), levelWon ? 1 : 2));
+        }
+    }
+}

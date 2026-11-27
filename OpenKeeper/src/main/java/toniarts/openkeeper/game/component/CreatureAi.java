@@ -1,0 +1,78 @@
+/*
+ * Copyright (C) 2014-2018 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.game.component;
+
+import com.simsilica.es.EntityComponent;
+import toniarts.openkeeper.game.controller.creature.CreatureState;
+
+/**
+ * Simple creature AI component
+ *
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public final class CreatureAi implements EntityComponent {
+
+    private static final int NO_STATE = -1;
+    private static final CreatureState[] CREATURE_STATES = CreatureState.values();
+
+    public double stateStartTime;
+    private int creatureState;
+    public short creatureId;
+    // Store the ordinal, as for creatureState, so FieldSerializer can serialize it.
+    private int targetState;
+    /** How long the state lasts, for the states that are timed by the cause that put the creature in them. */
+    public double stateDuration;
+
+    public CreatureAi() {
+    }
+
+    public CreatureAi(double stateStartTime, CreatureState creatureState, short creatureId) {
+        this(stateStartTime, creatureState, creatureId, null);
+    }
+
+    /** Creates a state with a request retained until the target is entered. */
+    public CreatureAi(double stateStartTime, CreatureState creatureState, short creatureId,
+            CreatureState targetState) {
+        this(stateStartTime, creatureState, creatureId, targetState, 0);
+    }
+
+    /** Creates a state that lasts for the given time, such as the Chicken spell. */
+    public CreatureAi(double stateStartTime, CreatureState creatureState, short creatureId,
+            CreatureState targetState, double stateDuration) {
+        this.stateDuration = stateDuration;
+        this.stateStartTime = stateStartTime;
+        this.creatureState = creatureState.ordinal();
+        this.creatureId = creatureId;
+        this.targetState = targetState == null || targetState == creatureState ? NO_STATE : targetState.ordinal();
+    }
+
+    /** Returns the requested state, or null when ordinary state selection applies. */
+    public CreatureState getTargetState() {
+        return targetState == NO_STATE ? null : CREATURE_STATES[targetState];
+    }
+
+    public final CreatureState getCreatureState() {
+
+        /**
+         * The creature state enum is not final class, so FieldSerializer wont
+         * serialize it. Easiest for us now is just to emulate the serialization
+         * like this
+         */
+        return CREATURE_STATES[creatureState];
+    }
+
+}

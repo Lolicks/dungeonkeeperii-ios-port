@@ -1,0 +1,316 @@
+/*
+ * Copyright (C) 2014-2017 OpenKeeper
+ *
+ * OpenKeeper is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * OpenKeeper is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with OpenKeeper.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package toniarts.openkeeper.view.control;
+
+import com.jme3.asset.AssetManager;
+import com.jme3.math.Vector2f;
+import com.jme3.renderer.RenderManager;
+import com.jme3.renderer.ViewPort;
+import com.jme3.scene.control.AbstractControl;
+import com.simsilica.es.Entity;
+import com.simsilica.es.EntityComponent;
+import com.simsilica.es.EntityData;
+import com.simsilica.es.EntityId;
+import com.simsilica.es.WatchedEntity;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
+import toniarts.openkeeper.game.component.Interaction;
+import toniarts.openkeeper.game.component.Owner;
+import toniarts.openkeeper.game.controller.DropValidator;
+import toniarts.openkeeper.game.map.IMapTileInformation;
+import toniarts.openkeeper.gui.CursorFactory;
+import toniarts.openkeeper.tools.convert.map.ArtResource;
+import toniarts.openkeeper.tools.convert.map.Terrain;
+import toniarts.openkeeper.utils.AssetUtils;
+import toniarts.openkeeper.view.animation.AnimationControl;
+import static toniarts.openkeeper.view.map.MapViewController.COLOR_FLASH;
+import toniarts.openkeeper.view.text.EntityTextParser;
+
+/**
+ * General entity controller, a bridge between entities and view
+ *
+ * @param <T> The type of the entity
+ * @param <S> The view state, or animation type
+ * @author Toni Helenius <helenius.toni@gmail.com>
+ */
+public abstract class EntityViewControl<T, S> extends AbstractControl implements IEntityViewControl<T, S>, AnimationControl {
+
+    private final EntityId entityId;
+    private final WatchedEntity entity;
+    private T data;
+    protected S currentState;
+    protected S targetState;
+    protected final AssetManager assetManager;
+    protected final EntityTextParser<T> textParser;
+    protected boolean isAnimationPlaying = false;
+
+    /**
+     * The owner of an entity that has lost its owner, never a player's id
+     */
+    private static final short NO_OWNER = -1;
+    private static final Collection<Class<? extends EntityComponent>> WATCHED_COMPONENTS = Arrays.asList(Interaction.class, Owner.class);
+
+    private boolean active = false;
+
+    public EntityViewControl(EntityId entityId, EntityData entityData, T data, S state, AssetManager assetManager, EntityTextParser<T> textParser) {
+        this.entityId = entityId;
+        this.currentState = state;
+        this.targetState = state;
+        this.assetManager = assetManager;
+        this.data = data;
+        this.textParser = textParser;
+
+        // Subscribe to the entity changes
+        entity = entityData.watchEntity(entityId, compileWatchedComponents());
+    }
+
+    /**
+     * Get the entity for this control. It has all the up to date components
+     * attached. To control what components are included, add the wanted
+     * components with the {@link #getWatchedComponents() } method.
+     *
+     * @return
+     */
+    protected final Entity getEntity() {
+        return entity;
+    }
+
+    private Class<EntityComponent>[] compileWatchedComponents() {
+        Set<Class<? extends EntityComponent>> components = new HashSet<>();
+        components.addAll(WATCHED_COMPONENTS);
+        if (textParser != null) {
+            components.addAll(textParser.getWatchedComponents());
+        }
+        components.addAll(getWatchedComponents());
+
+        return components.toArray(new Class[0]);
+    }
+
+    /**
+     * Override this to give out the components needed to watch for. By default
+     * a mutable list is returned so you can just ourright add your stuff here.
+     * No need to worry about duplicates.
+     *
+     * @return list of components needed from the entity
+     */
+    protected Collection<Class<? extends EntityComponent>> getWatchedComponents() {
+        return new ArrayList<>();
+    }
+
+    @Override
+    protected void controlUpdate(float tpf) {
+        entity.applyChanges();
+    }
+
+    @Override
+    protected void controlRender(RenderManager rm, ViewPort vp) {
+
+    }
+
+    @Override
+    public String getTooltip(short playerId) {
+        return "";
+    }
+
+    @Override
+    public boolean isPickable(short playerId) {
+        Interaction interaction = entity.get(Interaction.class);
+        if (interaction == null) {
+            return false;
+        }
+        return interaction.pickUppable;
+    }
+
+    @Override
+    public boolean isInteractable(short playerId) {
+        Interaction interaction = entity.get(Interaction.class);
+        if (interaction == null) {
+            return false;
+        }
+        return (interaction.interactable || interaction.slappable) && getControlId() == playerId;
+    }
+
+    @Override
+    public CursorFactory.CursorType getInHandCursor() {
+        return CursorFactory.CursorType.HOLD_THING;
+    }
+
+    @Override
+    public CursorFactory.CursorType getDropCursor() {
+        return null;
+    }
+
+    @Override
+    public ArtResource getInHandMesh() {
+        return null;
+    }
+
+    @Override
+    public ArtResource getInHandIcon() {
+        return null;
+    }
+
+    @Override
+    public DroppableStatus getDroppableStatus(IMapTileInformation tile, Terrain terrain, short playerId) {
+        Interaction interaction = entity.get(Interaction.class);
+        return DropValidator.canDrop(interaction, false, tile, terrain, playerId) ? DroppableStatus.DROPPABLE : DroppableStatus.NOT_DROPPABLE;
+    }
+
+    @Override
+    public void drop(IMapTileInformation tile, Vector2f coordinates, IEntityViewControl control) {
+
+    }
+
+    @Override
+    public void onHover(short playerId) {
+        UnitFlowerControl.showUnitFlower(this, null);
+    }
+
+    @Override
+    public void onHoverStart(short playerId) {
+        setHighlight(isInteractable(playerId) || isPickable(playerId));
+    }
+
+    @Override
+    public void onHoverEnd(short playerId) {
+        setHighlight(false);
+    }
+
+    private void setHighlight(final boolean enabled) {
+        if (active != enabled) {
+            active = enabled;
+            AssetUtils.setModelHighlight(spatial, COLOR_FLASH, enabled);
+        }
+    }
+
+    @Override
+    public short getOwnerId() {
+
+        // An entity being removed (e.g. a sold door under the cursor) may already have lost its owner
+        Owner owner = entity.get(Owner.class);
+        return owner != null ? owner.ownerId : NO_OWNER;
+    }
+
+    @Override
+    public short getControlId() {
+        Owner owner = entity.get(Owner.class);
+        return owner != null ? owner.controlId : NO_OWNER;
+    }
+
+    @Override
+    public void pickUp(short playerId) {
+
+    }
+
+    @Override
+    public void interact(short playerId) {
+
+    }
+
+    @Override
+    public boolean isSlappable(short playerId) {
+        Interaction interaction = entity.get(Interaction.class);
+        if (interaction == null) {
+            return false;
+        }
+
+        // Only our own, the server ignores slaps on anything else
+        return interaction.slappable && getOwnerId() == playerId;
+    }
+
+    @Override
+    public void slap(short playerId) {
+
+    }
+
+    @Override
+    public EntityId getEntityId() {
+        return entityId;
+    }
+
+    @Override
+    public void onAnimationStop() {
+        isAnimationPlaying = false;
+    }
+
+    @Override
+    public void onAnimationCycleDone() {
+
+    }
+
+    @Override
+    public boolean isStopAnimation() {
+        return targetState == null || targetState != currentState;
+    }
+
+    @Override
+    public void setTargetState(S state) {
+        this.targetState = state;
+    }
+
+    @Override
+    public S getCurrentState() {
+        return currentState;
+    }
+
+    @Override
+    public T getDataObject() {
+        return data;
+    }
+
+    @Override
+    public void setDataObject(T data) {
+        this.data = data;
+    }
+
+    protected abstract ArtResource getAnimationData(S state);
+
+    @Override
+    public void cleanup() {
+        entity.release();
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 7;
+        hash = 41 * hash + Objects.hashCode(this.entityId);
+        return hash;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        final EntityViewControl<?, ?> other = (EntityViewControl<?, ?>) obj;
+        if (!Objects.equals(this.entityId, other.entityId)) {
+            return false;
+        }
+        return true;
+    }
+
+}

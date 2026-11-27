@@ -1,0 +1,39 @@
+# This workflow will build a Java project with Gradle
+# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-gradle
+
+name: Java CI with Gradle
+
+on:
+  push:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+    - name: Set up JDK
+      uses: actions/setup-java@v6
+      with:
+        java-version: '25'
+        distribution: 'temurin'
+    - uses: Trass3r/setup-cpp@master
+    - name: Build with Gradle
+      run: ./gradlew build
+    - uses: actions/upload-artifact@v7
+      with:
+        name: distribution
+        path: build/distributions/OpenKeeper.zip
+    - uses: marvinpinto/action-automatic-releases@latest
+      if: github.ref_name == 'master'
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest"
+        prerelease: true
+        title: "Development Build"
+        files: |
+          build/distributions/OpenKeeper.zip
