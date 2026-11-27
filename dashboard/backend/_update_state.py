@@ -78,6 +78,51 @@ con.execute(
      "Ported A*, creature needs and economy to Swift GameLogic; Python oracle passed."),
 )
 
+more_logic = [
+    ("Port world model (tiles/rooms/gold tiers) to Swift", "GAME LOGIC", "NEEDS TESTING", "MEDIUM",
+     "MapData index, MapTile, RoomState, StoredGoldVisuals, PlayerGoldControl."),
+    ("Port fixed-step GameLoop to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "16,666,667 ns interval, dropped makeup frames, pause/resume."),
+    ("Port damage/health/combat/experience rules to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "EntityController scaleDamage, HealthSystem, CombatRules rear bonus, level scaling."),
+    ("Port payday and mood anger systems to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "PayDaySystem clocks/wages, CreatureMoodSystem anger accumulation."),
+    ("Port worker task selection and TileWork to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "TaskWorkerPriorityComparator, Manhattan+priority score, dig/claim formulas, chicken cooldown."),
+    ("Verify all Swift GameLogic with XCTest on macOS", "TESTING", "NOT STARTED", "HIGH",
+     "Blocked by no local macOS / CI billing."),
+]
+for title, cat, status, priority, notes in more_logic:
+    if not con.execute("SELECT 1 FROM tasks WHERE title=?", (title,)).fetchone():
+        con.execute(
+            "INSERT INTO tasks(title,category,weight,status,priority,notes,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (title, cat, 20 if cat == "GAME LOGIC" else 5, status, priority, notes, now),
+        )
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "INFO", "source-code",
+     "Ported world model, GameLoop, combat, payday/mood and worker tasks; oracle now 19 groups."),
+)
+
+more_logic_2 = [
+    ("Port shots/traps damage rules to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "ShotsController damage types, range falloff, lightning water x2, drain."),
+    ("Port battles/slap/torture/pay collection to Swift", "GAME LOGIC", "NEEDS TESTING", "MEDIUM",
+     "Battle grouping, slap anger, torture mood, half-pay collection."),
+]
+for title, cat, status, priority, notes in more_logic_2:
+    if not con.execute("SELECT 1 FROM tasks WHERE title=?", (title,)).fetchone():
+        con.execute(
+            "INSERT INTO tasks(title,category,weight,status,priority,notes,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)", (title, cat, 20, status, priority, notes, now),
+        )
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "INFO", "source-code",
+     "Ported shots and social systems; Python oracle now 22 groups, all passing."),
+)
+
 ci_title = "GitHub Actions blocked by account billing"
 if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
     con.execute(

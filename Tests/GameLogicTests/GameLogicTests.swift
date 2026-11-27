@@ -98,4 +98,115 @@ final class GameLogicTests: XCTestCase {
         XCTAssertEqual(EconomyLogic.subGold(5, from: &treasuries), 0)
         XCTAssertEqual(treasuries.map(\.gold), [7, 3])
     }
+
+    func testMapIndexAndStoredGoldTiers() {
+        var map = MapData<Int>(width: 8, height: 4, initial: 0)
+        map.set(7, x: 3, y: 2)
+        XCTAssertEqual(map.at(x: 3, y: 2), 7)
+        XCTAssertEqual(map.index(x: 3, y: 2), 19)
+        XCTAssertEqual(StoredGoldVisual(gold: 5, maxGold: 30).rawValue, 1)
+        XCTAssertEqual(StoredGoldVisual(gold: 15, maxGold: 30).rawValue, 2)
+        XCTAssertEqual(StoredGoldVisual(gold: 29, maxGold: 30).rawValue, 3)
+    }
+
+    func testPlayerGoldCapAndMinedCounter() {
+        var wallet = PlayerGold(goldMax: 50)
+        wallet.addGold(80)
+        XCTAssertEqual(wallet.gold, 50)
+        XCTAssertEqual(wallet.goldMined, 80)
+        wallet.subGold(20)
+        XCTAssertEqual(wallet.gold, 30)
+        XCTAssertTrue(RoomObjectType.trainee.occupiedByCreatures)
+        XCTAssertFalse(RoomObjectType.gold.occupiedByCreatures)
+    }
+
+    func testFixedStepClock() {
+        var clock = FixedStepClock()
+        XCTAssertNil(clock.tick(now: 10_000_000))
+        if let tick = clock.tick(now: 20_000_000) {
+            XCTAssertEqual(tick, 0.02, accuracy: 1e-9)
+        } else {
+            XCTFail("Expected a tick at the 60 FPS interval")
+        }
+        XCTAssertNotNil(clock.tick(now: 40_000_000))
+        clock.pause()
+        XCTAssertNil(clock.tick(now: 50_000_000))
+        clock.resume(now: 50_000_000)
+        XCTAssertNotNil(clock.tick(now: 61_000_000))
+    }
+
+    func testDamageScalingAndRearBonus() {
+        XCTAssertEqual(DamageRules.scale(100, config: DamageConfig()), 100)
+        var armour = DamageConfig(); armour.hasArmour = true
+        XCTAssertEqual(DamageRules.scale(100, config: armour), 50)
+        var frozen = DamageConfig(); frozen.frozen = true
+        XCTAssertEqual(DamageRules.scale(100, config: frozen), 125)
+        XCTAssertEqual(DamageRules.scale(-30, config: armour), -30)
+        XCTAssertEqual(CombatRules.rearAttackBonus(damage: 100, dot: 1,
+                                                   facingLength: 1, directionLength: 1), 100)
+        XCTAssertGreaterThan(CombatRules.rearAttackBonus(damage: 100, dot: 0,
+                                                        facingLength: 1, directionLength: 1), 116)
+    }
+
+    func testHealthAndExperienceRules() {
+        let result = HealthRules.apply(health: 10, maxHealth: 100, damage: 20)
+        XCTAssertEqual(result.health, 0)
+        XCTAssertTrue(result.dead)
+        XCTAssertTrue(HealthRules.attacksDelayed(health: 10, maxHealth: 100, isWorker: false))
+        XCTAssertEqual(ExperienceRules.fightingGain(experiencePerSecond: 20, ticksPerSecond: 4), 5)
+        let levelled = ExperienceRules.addExperience(100, level: 1, experienceToNextLevel: 100)
+        XCTAssertEqual(levelled.level, 2)
+        XCTAssertEqual(levelled.experience, 0)
+        XCTAssertEqual(ExperienceRules.scaledByLevel(200, levelPercent: 150), 300)
+    }
+
+    func testPaydayAndMoodRules() {
+        let rules = PayDayRules()
+        let clock = rules.startClock(gameTime: 100)
+        XCTAssertEqual(clock.nextPayDay, 700)
+        XCTAssertEqual(rules.angerPerTick(angerNoPay: 100, unpaid: 5, held: false), 25)
+        XCTAssertEqual(rules.angerPerTick(angerNoPay: 100, unpaid: 0, held: false), 0)
+        var cfg = MoodTickConfig()
+        cfg.lairRoomAvailable = true
+        cfg.hungerAmountNeeded = 3
+        cfg.hungerFill = 2
+        cfg.hatcheryAvailable = true
+        XCTAssertEqual(MoodSystemRules.noLairAnger(angerNoLair: 100, config: cfg), 25)
+        XCTAssertEqual(MoodSystemRules.noFoodAnger(angerNoFood: 80, config: cfg), 20)
+    }
+
+    func testShotsAndSocialRules() {
+        XCTAssertEqual(ShotRules.rangeDamage(damage: 100, radius: 10, distance: 3), 70)
+        XCTAssertEqual(ShotRules.rangeDamage(damage: 100, radius: 10, distance: 10), 0)
+        XCTAssertEqual(ShotRules.lightningDamage(base: 20, onWater: true), 40)
+        XCTAssertEqual(ShotRules.drain(targetHealth: 50, shooterMaxHealth: 200, percent: 10), 20)
+        XCTAssertEqual(ShotRules.constantHits(origin: Tile(x: 0, y: 0), radius: 1,
+                                              damage: 5).count, 4)
+        XCTAssertEqual(CollectPayRules.keptByCreature(collected: 100, maxGold: 30,
+                                                     currentGold: 10), 20)
+        XCTAssertFalse(BattleRules.canLeaveBattle(gameTime: 103.9, joinedAt: 100))
+        XCTAssertTrue(BattleRules.canLeaveBattle(gameTime: 104, joinedAt: 100))
+        let slap = SlapRules.apply(health: 50, maxHealth: 100, slapDamage: 5,
+                                   otherAnger: 10, slapAnger: 7, sleepNeed: 20)
+        XCTAssertEqual(slap.health, 45)
+        XCTAssertEqual(slap.anger, 17)
+        XCTAssertEqual(slap.sleepNeed, 15)
+    }
+
+    func testTaskSelectionAndTileWork() {
+        let start = Tile(x: 0, y: 0)
+        XCTAssertEqual(TaskSelectionRules.points(from: start, to: Tile(x: 3, y: 4), priority: 100), 107)
+        let tasks = [
+            TaskDescriptor(id: 1, type: .claimWall, location: start, points: 1, created: 1),
+            TaskDescriptor(id: 2, type: .digTile, location: start, points: 5, created: 2),
+            TaskDescriptor(id: 3, type: .fetchTrapCrate, location: start, points: 9, created: 3),
+        ]
+        let sorted = TaskSelectionRules.sortedForWorker(tasks)
+        XCTAssertEqual(sorted.map(\.id), [3, 2, 1])
+        XCTAssertEqual(TileWorkRules.perSwing(rate: 10), 10)
+        XCTAssertEqual(TileWorkRules.perTick(rate: 10), 10)
+        XCTAssertEqual(TileWorkRules.goldReleased(totalGold: 100, maxHealth: 200, health: 50), 75)
+        XCTAssertEqual(ChickenSpawnRules.cooldown(tiles: 10, firstDelay: 0), 11)
+        XCTAssertEqual(TileWorkRules.digAssignees(openSides: 3), 9)
+    }
 }

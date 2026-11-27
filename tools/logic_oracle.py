@@ -169,6 +169,163 @@ def sub_gold_treasuries(treasuries: list[tuple[int, int]], amount: int) -> list[
     return [tuple(r) for r in result]
 
 
+def map_index(x: int, y: int, width: int) -> int:
+    """MapData.java:49-62."""
+    return y * width + x
+
+
+def stored_gold_visual(gold: int, max_gold: int) -> int:
+    """StoredGoldVisuals.java:39-51."""
+    if max_gold <= 0:
+        return 3
+    if gold < max_gold // 3:
+        return 1
+    if gold < 2 * max_gold // 3:
+        return 2
+    return 3
+
+
+@dataclass
+class PlayerGold:
+    gold: int = 0
+    gold_max: int = 100
+    gold_mined: int = 0
+
+    def add_gold(self, value: int) -> None:
+        """PlayerGoldControl.addGold: gold=min(gold+value,max), goldMined+=value."""
+        if value <= 0:
+            return
+        self.gold = min(self.gold + value, self.gold_max)
+        self.gold_mined += value
+
+    def sub_gold(self, value: int) -> None:
+        if value <= 0:
+            return
+        self.gold = max(0, self.gold - value)
+
+
+@dataclass
+class FixedStepClock:
+    """GameLoop.java: fixed update rate, dropped makeup frames, pause resume."""
+    update_rate: int = 16_666_667
+    frame_rate: int = 0
+    last_time: int = 0
+    paused: bool = False
+
+    def tick(self, now: int) -> float | None:
+        if self.paused:
+            return None
+        delta = now - self.last_time
+        if delta + self.frame_rate >= self.update_rate:
+            self.last_time = now
+            self.frame_rate += delta - self.update_rate
+            return delta / 1_000_000_000
+        return None
+
+    @property
+    def sleep_ms(self) -> int:
+        return max(0, (self.update_rate - self.frame_rate) // 1_000_000)
+
+    def resume(self, now: int) -> None:
+        self.paused = False
+        self.last_time = now
+
+
+def scale_damage(amount: int, possessed=False, armour=False, frozen=False,
+                 stunned=False) -> int:
+    """EntityController.scaleDamage (lines 255-279)."""
+    if amount <= 0:
+        return amount
+    multiplier = 128
+    if possessed or armour:
+        multiplier -= 64
+    if frozen:
+        multiplier += 32
+    if not frozen and stunned:
+        multiplier += 128
+    return min(2**31 - 1, amount * multiplier // 128)
+
+
+def rear_attack_bonus(damage: int, dot: float, facing_len: float,
+                      direction_len: float) -> int:
+    """CombatRules.addRearAttackBonus (lines 60-79)."""
+    denominator = facing_len * direction_len
+    if denominator <= 0:
+        return damage
+    raw = max(-1.0, min(1.0, dot / denominator))
+    import math as _m
+    steps = min(1023, int(_m.acos(raw) / _m.pi * 1024))
+    percent = steps // 20
+    if percent < 16:
+        return damage
+    return damage + damage * percent // 100
+
+
+def experience_add(experience: int, level: int, to_next: int) -> tuple[int, int]:
+    """CreatureExperienceSystem.addExperience (lines 219-228)."""
+    if experience >= to_next:
+        return min(10, level + 1), 0
+    return level, experience
+
+
+def payday_start(game_time: int, before_first: int = 600) -> tuple[int, int]:
+    return game_time + before_first, game_time
+
+
+def mood_anger(anger_authored: int, held: bool = False) -> int:
+    """CreatureMood.toRuntimeValue: authored / 4, applied each tick."""
+    return 0 if held else anger_authored // 4
+
+
+def task_points(start: Tile, goal: Tile, priority: int) -> int:
+    """TaskManager: Manhattan distance + task priority."""
+    return manhattan(start, goal) + priority
+
+
+def tile_work_per_swing(rate: int, efficiency: int = 100) -> int:
+    return (abs(rate) * efficiency + 99) // 100
+
+
+def tile_work_per_tick(rate: int, efficiency: int = 100) -> int:
+    return (abs(rate) * (efficiency * 4096 // 100)) >> 12
+
+
+def gold_released(total_gold: int, max_health: int, health: int) -> int:
+    if max_health <= 0:
+        return 0
+    return total_gold * (max_health - health) // max_health
+
+
+def chicken_cooldown(tiles: int) -> int:
+    values = [15, 13, 12]
+    if tiles < 1 or tiles >= 20:
+        return 3
+    if tiles <= 9:
+        return values[(tiles - 1) // 3]
+    return max(4, 21 - tiles)
+
+
+def shot_range_damage(damage: int, radius: int, distance: int) -> int:
+    """ShotsController: damage * (radius - distance) / radius."""
+    if radius <= 0 or distance >= radius:
+        return 0
+    return damage * (radius - distance) // radius
+
+
+def lightning_damage(base: int, on_water: bool) -> int:
+    """LightningShotProcessor: x2 on water."""
+    return base * 2 if on_water else base
+
+
+def collect_pay(collected: int, max_gold: int, current_gold: int) -> int:
+    """CollectPay: creature keeps half, capped by carry capacity."""
+    return min(collected // 2, max(0, max_gold - current_gold))
+
+
+def battle_can_leave(game_time: float, joined_at: float) -> bool:
+    return game_time - joined_at >= 4.0
+
+
 def run_checks() -> None:
     # 1. Plain 4-neighbour A* on an empty grid: 9 tiles, cost 8.
     result = find_path(Grid(5, 5), Tile(0, 0), Tile(4, 4))
@@ -215,7 +372,80 @@ def run_checks() -> None:
     # 9. Gold distribution respects capacity; subtraction uses ceil per treasury.
     assert add_gold_treasuries([(5, 10), (0, 10)], 10) == [(10, 10), (5, 10)]
     assert sub_gold_treasuries([(10, 20), (3, 20)], 5) == [(7, 20), (1, 20)]
-    print("ALL LOGIC ORACLE CHECKS PASSED (9 groups)")
+    # 10. MapData flat index and StoredGoldVisuals tiers.
+    assert map_index(3, 2, 8) == 19
+    assert stored_gold_visual(5, 30) == 1
+    assert stored_gold_visual(15, 30) == 2
+    assert stored_gold_visual(29, 30) == 3
+
+    # 11. PlayerGoldControl cap and lifetime mined counter.
+    wallet = PlayerGold(gold_max=50)
+    wallet.add_gold(80)
+    assert wallet.gold == 50 and wallet.gold_mined == 80
+    wallet.sub_gold(20)
+    assert wallet.gold == 30
+    # 12. FixedStepClock: no tick before one interval, one tick (not catch-up) after,
+    # pause suppresses ticks, resume resets lastTime.
+    clock = FixedStepClock()
+    assert clock.tick(10_000_000) is None
+    tick = clock.tick(20_000_000)
+    assert tick is not None and abs(tick - 0.02) < 1e-9
+    assert clock.tick(40_000_000) is not None
+    clock.paused = True
+    assert clock.tick(50_000_000) is None
+    clock.resume(50_000_000)
+    assert clock.tick(61_000_000) is not None
+    assert clock.sleep_ms >= 0
+    # 13. Damage scaling in 128ths: armour halves, freeze adds 32/128,
+    # stun doubles unless frozen, healing is never scaled.
+    assert scale_damage(100) == 100
+    assert scale_damage(100, armour=True) == 50
+    assert scale_damage(100, frozen=True) == 125
+    assert scale_damage(100, stunned=True) == 200
+    assert scale_damage(-30, armour=True) == -30
+
+    # 14. Rear attack bonus only applies from ~16% upward.
+    assert rear_attack_bonus(100, 1.0, 1, 1) == 100
+    assert rear_attack_bonus(100, 0.0, 1, 1) > 116
+
+    # 15. Experience level-up resets accumulated experience and caps at 10.
+    assert experience_add(100, 1, 100) == (2, 0)
+    assert experience_add(99, 1, 100) == (1, 99)
+    assert experience_add(500, 10, 100) == (10, 0)
+
+    # 16. Payday clock and anger per tick.
+    assert payday_start(100) == (700, 100)
+    assert mood_anger(100) == 25
+    assert mood_anger(100, held=True) == 0
+
+    # 17. Worker task score = Manhattan distance + priority.
+    assert task_points(Tile(0, 0), Tile(3, 4), 100) == 107
+
+    # 18. Tile work formulas and seam gold release.
+    assert tile_work_per_swing(10) == 10
+    assert tile_work_per_tick(10) == 10
+    assert gold_released(100, 200, 50) == 75
+
+    # 19. Chicken hatchery cooldown tiers.
+    assert chicken_cooldown(0) == 3
+    assert chicken_cooldown(2) == 15
+    assert chicken_cooldown(10) == 11
+    assert chicken_cooldown(15) == 6
+    assert chicken_cooldown(20) == 3
+    # 20. Shots: RANGE_FROM_ORIGIN diminishing damage, lightning water x2.
+    assert shot_range_damage(100, 10, 3) == 70
+    assert shot_range_damage(100, 10, 10) == 0
+    assert lightning_damage(20, False) == 20
+    assert lightning_damage(20, True) == 40
+
+    # 21. Pay collection keeps half, capped by carry capacity.
+    assert collect_pay(100, 30, 10) == 20
+    assert collect_pay(10, 30, 28) == 2
+
+    # 22. Battle minimum stay is 4 seconds.
+    assert not battle_can_leave(103.9, 100)
+    assert battle_can_leave(104.0, 100)
+    print("ALL LOGIC ORACLE CHECKS PASSED (22 groups)")
 
 
 if __name__ == "__main__":

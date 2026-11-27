@@ -21,6 +21,7 @@ DungeonKeeperII-iOS/
 ├── Tests/GameLogicTests/           # XCTest-набор (запускается swift test на Mac)
 ├── Package.swift                   # headless Swift package для тестов
 ├── tools/logic_oracle.py           # локально выполняемый эталон алгоритмов
+├── GAMELOGIC_COVERAGE.md           # карта портированных формул и пробелов
 ├── Resources/ Configuration/
 ├── dashboard/
 │   ├── frontend/                   # React + TypeScript + Recharts + Tailwind
