@@ -14,8 +14,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Fetch converted DK2 assets (private repository)
+        env:
+          ASSETS_TOKEN: ${{ secrets.ASSETS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ASSETS_TOKEN}" ]; then
+            echo "ASSETS_TOKEN secret missing" >&2
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${ASSETS_TOKEN}@github.com/Lolicks/dungeonkeeperii-ios-assets.git" \
+            "$RUNNER_TEMP/dk2-assets"
+          mkdir -p ios/Resources/Converted
+          cp -R "$RUNNER_TEMP/dk2-assets/Converted/." ios/Resources/Converted/
+          echo "Assets: $(find ios/Resources/Converted -type f | wc -l) files, $(du -sh ios/Resources/Converted | cut -f1)"
 
       - name: Build archive (unsigned)
         run: |
