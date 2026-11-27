@@ -52,6 +52,32 @@ for msg in [
         (now, "INFO", "system", msg),
     )
 
+logic_weights = {"GAME LOGIC": 20}
+logic_tasks = [
+    ("Port A* pathfinding to Swift (GameLogic)", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "Swift port of MapIndexedGraph/MapDistance rules; Python oracle passes 9 check groups."),
+    ("Port creature needs (hunger/sleep/mood) to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "Formulas from CreatureSleepSystem, CreatureController, CreatureMood."),
+    ("Port gold economy to Swift", "GAME LOGIC", "NEEDS TESTING", "MEDIUM",
+     "GameWorldController add/sub gold rules ported."),
+    ("Create headless XCTest suite for GameLogic", "TESTING", "COMPLETED", "MEDIUM",
+     "Tests/GameLogicTests + Package.swift; awaiting macOS to execute."),
+    ("Run Swift XCTest suite on macOS", "TESTING", "NOT STARTED", "HIGH",
+     "Blocked by no local macOS / CI billing."),
+]
+for title, cat, status, priority, notes in logic_tasks:
+    if not con.execute("SELECT 1 FROM tasks WHERE title=?", (title,)).fetchone():
+        con.execute(
+            "INSERT INTO tasks(title,category,weight,status,priority,notes,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (title, cat, logic_weights.get(cat, 5), status, priority, notes, now),
+        )
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "INFO", "source-code",
+     "Ported A*, creature needs and economy to Swift GameLogic; Python oracle passed."),
+)
+
 ci_title = "GitHub Actions blocked by account billing"
 if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
     con.execute(

@@ -17,7 +17,11 @@ DungeonKeeperII-iOS/
 ├── OpenKeeper/                     # клон оригинального репозитория, ветка ios-port
 ├── ios/                            # нативный Xcode-проект (Metal 3D-сцена)
 ├── .github/workflows/build-ios.yml # сборка IPA на macOS-раннере GitHub
-├── Sources/ Resources/ Configuration/
+├── Sources/GameLogic/              # Swift-порт A*, нужд существ и экономики
+├── Tests/GameLogicTests/           # XCTest-набор (запускается swift test на Mac)
+├── Package.swift                   # headless Swift package для тестов
+├── tools/logic_oracle.py           # локально выполняемый эталон алгоритмов
+├── Resources/ Configuration/
 ├── dashboard/
 │   ├── frontend/                   # React + TypeScript + Recharts + Tailwind
 │   ├── backend/                    # Python FastAPI + WebSocket
