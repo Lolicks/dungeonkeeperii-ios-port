@@ -1,8 +1,8 @@
 name: Build iOS IPA
 
 on:
-  push:
-    branches: [ios-port, main, master]
+  # Builds are started manually only: the user asked to stop intermediate IPAs
+  # while the game logic is being ported.
   workflow_dispatch:
 
 jobs:
