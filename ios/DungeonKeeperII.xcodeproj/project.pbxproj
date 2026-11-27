@@ -29,17 +29,17 @@
 		B2000000000000000000003 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
 		B2000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B2000000000000000000005 /* DungeonKeeperII.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DungeonKeeperII.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B2000000000000000000006 /* MapModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MapModel.swift; path = ../Sources/GameLogic/MapModel.swift; sourceTree = "<group>"; };
-		B2000000000000000000007 /* PathFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PathFinder.swift; path = ../Sources/GameLogic/PathFinder.swift; sourceTree = "<group>"; };
-		B2000000000000000000008 /* CreatureNeeds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CreatureNeeds.swift; path = ../Sources/GameLogic/CreatureNeeds.swift; sourceTree = "<group>"; };
-		B2000000000000000000009 /* Economy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Economy.swift; path = ../Sources/GameLogic/Economy.swift; sourceTree = "<group>"; };
-		B200000000000000000000A /* WorldModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WorldModel.swift; path = ../Sources/GameLogic/WorldModel.swift; sourceTree = "<group>"; };
-		B200000000000000000000B /* GameClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GameClock.swift; path = ../Sources/GameLogic/GameClock.swift; sourceTree = "<group>"; };
-		B200000000000000000000C /* Combat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Combat.swift; path = ../Sources/GameLogic/Combat.swift; sourceTree = "<group>"; };
-		B200000000000000000000D /* PayAndMood.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PayAndMood.swift; path = ../Sources/GameLogic/PayAndMood.swift; sourceTree = "<group>"; };
-		B200000000000000000000E /* TaskSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskSystem.swift; path = ../Sources/GameLogic/TaskSystem.swift; sourceTree = "<group>"; };
-		B200000000000000000000F /* Shots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Shots.swift; path = ../Sources/GameLogic/Shots.swift; sourceTree = "<group>"; };
-		B2000000000000000000010 /* Social.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Social.swift; path = ../Sources/GameLogic/Social.swift; sourceTree = "<group>"; };
+		B2000000000000000000006 /* MapModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MapModel.swift; path = ../../Sources/GameLogic/MapModel.swift; sourceTree = "<group>"; };
+		B2000000000000000000007 /* PathFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PathFinder.swift; path = ../../Sources/GameLogic/PathFinder.swift; sourceTree = "<group>"; };
+		B2000000000000000000008 /* CreatureNeeds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CreatureNeeds.swift; path = ../../Sources/GameLogic/CreatureNeeds.swift; sourceTree = "<group>"; };
+		B2000000000000000000009 /* Economy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Economy.swift; path = ../../Sources/GameLogic/Economy.swift; sourceTree = "<group>"; };
+		B200000000000000000000A /* WorldModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WorldModel.swift; path = ../../Sources/GameLogic/WorldModel.swift; sourceTree = "<group>"; };
+		B200000000000000000000B /* GameClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GameClock.swift; path = ../../Sources/GameLogic/GameClock.swift; sourceTree = "<group>"; };
+		B200000000000000000000C /* Combat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Combat.swift; path = ../../Sources/GameLogic/Combat.swift; sourceTree = "<group>"; };
+		B200000000000000000000D /* PayAndMood.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PayAndMood.swift; path = ../../Sources/GameLogic/PayAndMood.swift; sourceTree = "<group>"; };
+		B200000000000000000000E /* TaskSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskSystem.swift; path = ../../Sources/GameLogic/TaskSystem.swift; sourceTree = "<group>"; };
+		B200000000000000000000F /* Shots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Shots.swift; path = ../../Sources/GameLogic/Shots.swift; sourceTree = "<group>"; };
+		B2000000000000000000010 /* Social.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Social.swift; path = ../../Sources/GameLogic/Social.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
