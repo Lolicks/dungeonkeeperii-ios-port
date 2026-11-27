@@ -1,0 +1,11 @@
+name: Runner smoke test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check runner
+        run: echo "runner is alive"
