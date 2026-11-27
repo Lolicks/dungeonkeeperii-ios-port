@@ -230,6 +230,20 @@ con.execute(
      "Ported creature state machine and hatchery spawning; oracle now 25 groups."),
 )
 
+con.execute(
+    "INSERT INTO builds(label,status,detail,artifact,ts) VALUES (?,?,?,?,?)",
+    ("CI #45944605263 (interactive scene)", "SUCCESS",
+     "Unsigned IPA 435.58 MB: Metal binary 182,280 B (was 163,200) and metallib "
+     "17,984 B (was 8,668) - textured dungeon floor + pan/pinch compiled in. "
+     "Original DK2 assets bundled. NOT a 1:1 game; manual builds only now.",
+     "output/DungeonKeeperII.ipa", now),
+)
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "INFO", "github-actions",
+     "Already-queued CI run 45944605263 finished; IPA updated with interactive scene (no new build started)."),
+)
+
 ci_title = "GitHub Actions blocked by account billing"
 if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
     con.execute(
