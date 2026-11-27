@@ -7,8 +7,10 @@
 - Проект: DUNGEON KEEPER II — IPHONE EDITION
 - Ветка: `ios-port` (репозиторий `OpenKeeper/`, HEAD `1a0e5f5`)
 - Хост: Windows; Git 2.47; Java 1.8.0_401; Gradle/Xcode/Swift отсутствуют
-- GitHub: `Lolicks/dungeonkeeperii-ios-port` (private), ветка `ios-port`
-- IPA: собирается в GitHub Actions на `macos-15`; локально `output/DungeonKeeperII.ipa` отсутствует
+- GitHub: `Lolicks/dungeonkeeperii-ios-port` (public), ветка `ios-port`
+- IPA: **собран** в CI run `45941116495`, скачан в `output/DungeonKeeperII.ipa` (52 807 bytes)
+- IPA содержимое: arm64 Mach-O + `default.metallib` + Info.plist; неподписанный
+- DK2 ресурсы: сконвертированы локально, 13 877 файлов / 770.6 МБ (в Git не загружаются)
 - Установка на iPhone: **не выполнялась** (нужна Apple подпись)
 - Соответствие оригиналу: **НЕ ПРОВЕРЕНО**
 - Прогресс: вычисляется из подтверждённых задач, не фиксируется вручную
@@ -19,24 +21,25 @@
 2. Репозиторий OpenKeeper клонирован, создана ветка `ios-port`.
 3. Технический аудит проведён → `IOS_PORT_TECHNICAL_AUDIT.md`.
 4. Локальный Control Center создан и запускается на `http://localhost:8080`.
-5. Создан приватный GitHub-репозиторий и workflow сборки IPA на macOS-раннере.
+5. Создан GitHub-репозиторий (сейчас публичный) и workflow сборки IPA на macOS-раннере.
 6. Создан нативный iOS Xcode-проект с рабочей Metal 3D-сценой (первая сцена на iOS).
 7. Перенесена чистая игровая логика в `Sources/GameLogic` (Swift, 11 файлов):
    A*, нужды, экономика, мир, GameLoop, бой/здоровье/опыт, выплаты/гнев,
    задачи/TileWork, выстрелы, драки/slap/пытка. Карта — `GAMELOGIC_COVERAGE.md`.
    Локальный Python-эталон проходит 22 группы проверок.
+9. Оригинальные ресурсы DK2 сконвертированы headless-конвертером OpenKeeper:
+   `CONVERSION_RESULT=true`, 13 877 файлов / 770.6 МБ.
+10. Неподписанный IPA собран в CI (`45941116495`) и скачан в `output/`.
 
 ## Критические блокеры
 
-1. Локальный хост — Windows: сборка идёт только в GitHub Actions (решено частично).
-   **GitHub Actions заблокирован биллингом аккаунта**: jobs не стартуют даже на ubuntu.
+1. Локальный хост — Windows: сборка идёт в GitHub Actions (решено через public repo).
 2. Нет Apple Developer credentials для подписи и установки на iPhone.
-3. Оригинальные ресурсы DK2 у пользователя есть, но в проект ещё не переданы.
+3. Ресурсы DK2 сконвертированы, но не включены в IPA и не загружены в Git.
 4. Физический iPhone у пользователя есть, но без подписи установка невозможна.
-5. Java 25 toolchain против Java 8 на хосте; iOS не поддерживает обычную JVM.
+5. IPA содержит только тестовую 3D-сцену — не готовую игру.
 
 ## Следующий шаг
 
-Продолжить перенос игровой логики OpenKeeper в `Sources/GameLogic`, затем
-(после починки биллинга или публичного репозитория) запустить `swift test` и
-первый успешный CI-билд, передать ресурсы и Apple signing.
+Интегрировать Swift `GameLogic` и сконвертированные ресурсы в Xcode-сборку,
+добавить Apple signing и только после этого называть IPA готовой игрой.

@@ -168,6 +168,30 @@ con.execute(
      "Original DK2 assets converted: 13,877 files / 770.6 MB into assets/Converted."),
 )
 
+con.execute(
+    "UPDATE tasks SET status='COMPLETED', notes=?, updated_at=? "
+    "WHERE title='Build first unsigned IPA in GitHub Actions'",
+    ("CI run 45941116495 SUCCESS; artifact 52,208 bytes; Mach-O arm64 + default.metallib.", now),
+)
+con.execute(
+    "INSERT INTO builds(label,status,detail,artifact,ts) VALUES (?,?,?,?,?)",
+    ("CI #45941116495", "SUCCESS",
+     "Unsigned Xcode archive on macos-15; Payload/DungeonKeeperII.app with Metal 3D scene. "
+     "NOT the full DK2 game; no converted assets bundled; not signed.",
+     "output/DungeonKeeperII.ipa", now),
+)
+con.execute(
+    "UPDATE problems SET status='RESOLVED', detail=?, updated_at=? "
+    "WHERE title='GitHub Actions blocked by account billing'",
+    ("Repository made public; macOS-15 runner works. CI run 45941116495 built an unsigned IPA.",
+     now),
+)
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "SUCCESS", "github-actions",
+     "Unsigned IPA built and downloaded: 52 KB, arm64 Mach-O + metallib + Info.plist."),
+)
+
 ci_title = "GitHub Actions blocked by account billing"
 if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
     con.execute(

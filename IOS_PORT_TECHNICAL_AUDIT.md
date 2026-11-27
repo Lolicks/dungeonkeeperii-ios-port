@@ -122,7 +122,8 @@ cannot distribute these, these wont go into our JAR files». Каталог
 
 ## 6. Что запрошено у пользователя и текущий ответ
 
-1. macOS/Xcode — **решено через GitHub Actions** (`macos-15`, workflow `build-ios.yml`).
+1. macOS/Xcode — **решено через GitHub Actions** (`macos-15`, workflow `build-ios.yml`);
+   неподписанный IPA собран в run `45941116495`.
 2. Apple Developer credentials / signing team — **всё ещё требуется** для установки
    на реальный iPhone.
 3. Оригинальные ресурсы DK2 — пользователь подтвердил наличие; **нужна передача**
