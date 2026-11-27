@@ -175,6 +175,29 @@ final class GameLogicTests: XCTestCase {
         XCTAssertEqual(MoodSystemRules.noFoodAnger(angerNoFood: 80, config: cfg), 20)
     }
 
+    func testCreatureStateMachineAndHatchery() {
+        var machine = CreatureStateMachine()
+        let next = machine.chooseIdleAction(now: 10, needs: [.hunger, .sleep, .findWork])
+        XCTAssertEqual(next, .goToSleep)
+        XCTAssertEqual(machine.stateStartTime, 10)
+
+        var work = CreatureStateMachine(state: .work, job: .train)
+        XCTAssertTrue(work.job.interruptible)
+        _ = work.updateWork(now: 20, hasVitalNeed: true,
+                            taskStillValid: true, arrivedAtWorkSpot: false)
+        XCTAssertEqual(work.state, .idle)
+
+        XCTAssertTrue(CreatureStateMachine.eatAttemptDue(now: 0.3, last: 0, ticksPerSecond: 20))
+        XCTAssertFalse(CreatureStateMachine.eatAttemptDue(now: 0.1, last: 0, ticksPerSecond: 20))
+        XCTAssertTrue(HatcherySystem.shouldReEvaluate(motionless: 5))
+        XCTAssertTrue(HatcherySystem.stateTimeExceeded(elapsed: 4, animationSeconds: 2, pecking: true))
+
+        var hatchery = HatcheryState(timeElapsed: 12)
+        XCTAssertTrue(HatcherySystem.evaluate(config: HatcheryConfig(),
+                                              state: &hatchery, tiles: 5))
+        XCTAssertEqual(hatchery.chickens, 1)
+    }
+
     func testShotsAndSocialRules() {
         XCTAssertEqual(ShotRules.rangeDamage(damage: 100, radius: 10, distance: 3), 70)
         XCTAssertEqual(ShotRules.rangeDamage(damage: 100, radius: 10, distance: 10), 0)

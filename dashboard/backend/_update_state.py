@@ -212,6 +212,24 @@ con.execute(
      "IPA with 13,877 DK2 assets built and downloaded: 435.57 MB, verified inside archive."),
 )
 
+state_tasks = [
+    ("Port creature state machine (IDLE/WORK) to Swift", "GAME LOGIC", "NEEDS TESTING", "HIGH",
+     "IdlePriority order, eat/sleep throttles, interruptible jobs from CreatureState.java."),
+    ("Port hatchery/chicken spawning to Swift", "GAME LOGIC", "NEEDS TESTING", "MEDIUM",
+     "ChickenSpawnSystem + ChickenController rules; cooldown tiers already ported."),
+]
+for title, cat, status, priority, notes in state_tasks:
+    if not con.execute("SELECT 1 FROM tasks WHERE title=?", (title,)).fetchone():
+        con.execute(
+            "INSERT INTO tasks(title,category,weight,status,priority,notes,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)", (title, cat, 20, status, priority, notes, now),
+        )
+con.execute(
+    "INSERT INTO activity(ts,level,source,message) VALUES (?,?,?,?)",
+    (now, "INFO", "source-code",
+     "Ported creature state machine and hatchery spawning; oracle now 25 groups."),
+)
+
 ci_title = "GitHub Actions blocked by account billing"
 if not con.execute("SELECT 1 FROM problems WHERE title=?", (ci_title,)).fetchone():
     con.execute(

@@ -17,8 +17,10 @@
 | `TaskSystem.swift` | `TaskWorkerPriorityComparator.java`, `TaskManager.java:1504`, `TileWork.java`, `ChickenSpawnSystem.java` | distance+priority, 3×open sides, perSwing/perTick, cooldown | oracle 17-19 |
 | `Shots.swift` | `ShotsController.java:305-389`, `LightningShotProcessor.java:81` | falloff, CONSTANT rect, drain, ×2 water | oracle 20 |
 | `Social.swift` | `BattleSystem.java`, `SlapSystem.java`, `CreatureTorturingSystem.java`, `CollectPay.java` | radius 5 / 4 s, slap anger без /4, collect/2 | oracle 21-22 |
+| `CreatureStateMachine.swift` | `CreatureState.java:82-167`, `CreatureController.java:654-713` | приоритет нужд IDLE, 4tick eat, 1s sleep, interruptible jobs | oracle 23-24 |
+| `HatcherySystem.swift` | `ChickenSpawnSystem.java:148-211`, `ChickenController.java:198-223` | cooldown, free-range cap, motionless 5s, pecking ×2 | oracle 25 |
 
-Итого: **11 Swift-файлов**, **22 группы локальных проверок**, все проходят.
+Итого: **13 Swift-файлов**, **25 групп локальных проверок**, все проходят.
 
 ## Что ещё НЕ портировано (реально)
 

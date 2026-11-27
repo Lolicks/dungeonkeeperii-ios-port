@@ -17,13 +17,15 @@ OpenKeeper. Нет зависимостей от UIKit, Metal, jMonkeyEngine, LW
 | `TaskSystem.swift` | приоритет задач, score = Manhattan + priority, TileWork, кинкубы | `TaskWorkerPriorityComparator.java`, `TaskManager.java:1504`, `TileWork.java`, `ChickenSpawnSystem.java` |
 | `Shots.swift` | типы урона выстрелов, затухание по радиусу, молния ×2 на воде | `ShotsController.java:305-389`, `LightningShotProcessor.java:81` |
 | `Social.swift` | группировка драк, slap, пытка, сбор зарплаты | `BattleSystem.java:54`, `SlapSystem.java`, `CreatureTorturingSystem.java`, `CollectPay.java` |
+| `CreatureStateMachine.swift` | приоритет нужд IDLE, прерывание WORK | `CreatureState.java:82-167`, `CreatureController.java:654-713` |
+| `HatcherySystem.swift` | спавн кур, cooldown, motionless/pecking | `ChickenSpawnSystem.java:148-211`, `ChickenController.java:198-223` |
 
 ## Проверка
 
 Локально на Windows запускается Python-эталон (`tools/logic_oracle.py`):
 ```
 python tools/logic_oracle.py
-# ALL LOGIC ORACLE CHECKS PASSED (22 groups)
+# ALL LOGIC ORACLE CHECKS PASSED (25 groups)
 ```
 
 На macOS (или в CI, когда будет разблокирован биллинг):

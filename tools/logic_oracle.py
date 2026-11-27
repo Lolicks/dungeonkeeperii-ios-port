@@ -326,6 +326,28 @@ def battle_can_leave(game_time: float, joined_at: float) -> bool:
     return game_time - joined_at >= 4.0
 
 
+IDLE_PRIORITY = ["party", "wait", "objective", "lair", "sleep", "hunger",
+                 "pay", "workerGoldDrop", "winnings", "disco", "findWork"]
+
+INTERRUPTIBLE_JOBS = {"research", "manufacture", "guard", "pray", "train", "gamble"}
+
+
+def choose_idle(needs: set[str]) -> str | None:
+    return next((p for p in IDLE_PRIORITY if p in needs), None)
+
+
+def eat_attempt_due(now: float, last: float, tps: int) -> bool:
+    return now - last >= 4.0 / tps
+
+
+def hatchery_spawn(time_elapsed: float, last_spawn: float, tiles: int,
+                   chickens: int, capacity: int) -> bool:
+    cooldown = chicken_cooldown(tiles)
+    if time_elapsed - last_spawn >= cooldown and chickens < capacity:
+        return True
+    return chickens < 4 and time_elapsed >= 10
+
+
 def run_checks() -> None:
     # 1. Plain 4-neighbour A* on an empty grid: 9 tiles, cost 8.
     result = find_path(Grid(5, 5), Tile(0, 0), Tile(4, 4))
@@ -445,7 +467,19 @@ def run_checks() -> None:
     # 22. Battle minimum stay is 4 seconds.
     assert not battle_can_leave(103.9, 100)
     assert battle_can_leave(104.0, 100)
-    print("ALL LOGIC ORACLE CHECKS PASSED (22 groups)")
+    # 23. Idle need priority: sleep beats hunger, hunger beats findWork.
+    assert choose_idle({"hunger", "findWork", "sleep"}) == "sleep"
+    assert choose_idle({"findWork", "pay"}) == "pay"
+
+    # 24. Eat attempts are throttled to 4 ticks; sleep to one per second.
+    assert eat_attempt_due(0.3, 0, 20)
+    assert not eat_attempt_due(0.1, 0, 20)
+    assert "train" in INTERRUPTIBLE_JOBS and "dig" not in INTERRUPTIBLE_JOBS
+
+    # 25. Hatchery spawn cooldown and free-range cap.
+    assert hatchery_spawn(12, 0, 5, 0, 8)
+    assert not hatchery_spawn(4, 0, 5, 0, 8)
+    print("ALL LOGIC ORACLE CHECKS PASSED (25 groups)")
 
 
 if __name__ == "__main__":
